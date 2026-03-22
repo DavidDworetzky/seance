@@ -21,23 +21,44 @@ pub struct FocusArgs {
 pub async fn run(args: FocusArgs) -> Result<()> {
     let ghostty = GhosttyBackend::new();
     let store = SessionStore::load()?;
+    let mut quadrants = store.active_quadrants();
+    quadrants.sort_by_key(|q| (q.monitor, q.quadrant));
 
-    let quadrant = if args.next {
-        store.next_quadrant()
-    } else if args.prev {
-        store.prev_quadrant()
+    let q = if args.next || args.prev {
+        let front_window = ghostty.front_window_id().ok();
+        let current_index = front_window.as_deref().and_then(|front| {
+            quadrants
+                .iter()
+                .position(|q| q.window_id.as_deref() == Some(front))
+        });
+        let index = if args.next {
+            match current_index {
+                Some(i) => (i + 1) % quadrants.len().max(1),
+                None => 0,
+            }
+        } else {
+            match current_index {
+                Some(0) | None => quadrants.len().saturating_sub(1),
+                Some(i) => i.saturating_sub(1),
+            }
+        };
+        quadrants
+            .get(index)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("No active worktrees"))?
     } else {
-        args.quadrant.unwrap_or(1)
+        let quadrant = args.quadrant.unwrap_or(1);
+        quadrants
+            .into_iter()
+            .find(|q| q.quadrant == quadrant)
+            .ok_or_else(|| anyhow::anyhow!("No active worktree in quadrant {}", quadrant))?
     };
 
-    let q = store
-        .active_quadrants()
-        .into_iter()
-        .find(|q| q.quadrant == quadrant)
-        .ok_or_else(|| anyhow::anyhow!("No active worktree in quadrant {}", quadrant))?;
-
-    ghostty.focus_window(&q.main_window_title())?;
-    println!("Focused Q{} ({})", quadrant, q.branch);
+    match q.window_id.as_deref() {
+        Some(window_id) => ghostty.focus_window(window_id)?,
+        None => ghostty.focus_window_title(&q.main_window_title())?,
+    }
+    println!("Focused Q{} ({})", q.quadrant, q.branch);
 
     Ok(())
 }

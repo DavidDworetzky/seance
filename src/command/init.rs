@@ -13,7 +13,10 @@ pub struct InitArgs {
 }
 
 pub async fn run(args: InitArgs) -> Result<()> {
-    let path = args.path.map(PathBuf::from).unwrap_or(std::env::current_dir()?);
+    let path = args
+        .path
+        .map(PathBuf::from)
+        .unwrap_or(std::env::current_dir()?);
     let config_path = path.join(".seance.yaml");
 
     if config_path.exists() {
@@ -87,9 +90,23 @@ group:
   - claude
   - codex
 
+agents:
+  claude:
+    command: {}
+    prompt_injection: trailing
+    auto_name: true
+    auto_name_command: {}
+  codex:
+    command: {}
+    prompt_injection: flag
+    auto_name: false
+
 merge_strategy: squash
 "#,
-        main_branch
+        main_branch,
+        yaml_quote(crate::agent::claude::COMMAND),
+        yaml_quote(crate::agent::claude::AUTO_NAME_COMMAND),
+        yaml_quote(crate::agent::codex::COMMAND),
     );
 
     // Add project-specific hooks and file ops
@@ -131,6 +148,10 @@ files:
     }
 
     config
+}
+
+fn yaml_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
 
 fn install_keybindings() -> Result<()> {
@@ -177,4 +198,23 @@ keybind = ctrl+s>p=text:seance focus --prev\n
     println!("Installed keybindings to {}", ghostty_config.display());
     println!("Reload Ghostty config to activate.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_yaml_quote() {
+        assert_eq!(yaml_quote("codex"), "'codex'");
+        assert_eq!(yaml_quote("it's"), "'it''s'");
+    }
+
+    #[test]
+    fn test_generate_default_config_is_parseable() {
+        let yaml = generate_default_config("main", "Unknown");
+        let parsed: crate::config::schema::Config = serde_yaml::from_str(&yaml).unwrap();
+        let codex = parsed.agents.get("codex").unwrap();
+        assert_eq!(codex.command, crate::agent::codex::COMMAND);
+    }
 }

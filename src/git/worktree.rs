@@ -11,9 +11,7 @@ fn worktree_base(config: &Config) -> Result<PathBuf> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "project".into());
 
-    let dir = config
-        .worktree_dir
-        .replace("{project}", &project_name);
+    let dir = config.worktree_dir.replace("{project}", &project_name);
 
     let base = if dir.starts_with('/') {
         PathBuf::from(&dir)
@@ -90,10 +88,7 @@ pub fn list(config: &Config) -> Result<Vec<(String, PathBuf)>> {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() && path.join(".git").exists() {
-            let name = entry
-                .file_name()
-                .to_string_lossy()
-                .to_string();
+            let name = entry.file_name().to_string_lossy().to_string();
             result.push((name, path));
         }
     }

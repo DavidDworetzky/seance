@@ -70,7 +70,11 @@ pub fn run_hook(command: &str, cwd: &Path) -> Result<()> {
         .with_context(|| format!("Failed to run hook: {}", command))?;
 
     if !status.success() {
-        anyhow::bail!("Hook failed (exit {}): {}", status.code().unwrap_or(-1), command);
+        anyhow::bail!(
+            "Hook failed (exit {}): {}",
+            status.code().unwrap_or(-1),
+            command
+        );
     }
 
     Ok(())
@@ -178,6 +182,9 @@ mod tests {
         copy_dir_recursive(src_dir.path(), &dst).unwrap();
 
         assert_eq!(std::fs::read_to_string(dst.join("a.txt")).unwrap(), "aaa");
-        assert_eq!(std::fs::read_to_string(dst.join("sub/b.txt")).unwrap(), "bbb");
+        assert_eq!(
+            std::fs::read_to_string(dst.join("sub/b.txt")).unwrap(),
+            "bbb"
+        );
     }
 }

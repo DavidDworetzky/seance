@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Args;
 
+use crate::agent;
 use crate::config::schema::Config;
 use crate::ghostty::GhosttyBackend;
 use crate::session::store::{SessionStatus, SessionStore};
@@ -44,7 +45,7 @@ pub async fn run(args: WakeArgs) -> Result<()> {
 
     // Restore quadrants
     let quadrants = store.quadrants_for(&session_id)?;
-    for q in &quadrants {
+    for q in quadrants {
         // Verify worktree still exists
         if !q.worktree_path.exists() {
             println!(
@@ -56,21 +57,35 @@ pub async fn run(args: WakeArgs) -> Result<()> {
         }
 
         let bounds = crate::layout::quadrant::compute_bounds(q.quadrant, q.monitor, &config);
-        ghostty.create_window(&q.worktree_path, &bounds)?;
+        let window = ghostty.create_window(&q.worktree_path, &bounds)?;
 
         // Re-split for each agent in the group
-        let agents: Vec<&String> = q.agents.keys().collect();
+        let agents = q.ordered_agent_names(&config.group);
+        let mut current_terminal = window.terminal_id.clone();
+        let mut restored = q.clone();
+        restored.window_id = Some(window.window_id);
+
         for (i, agent_name) in agents.iter().enumerate() {
             if i > 0 {
-                ghostty.split_right()?;
+                current_terminal = ghostty.split_right(&current_terminal)?;
             }
-            // Optionally re-launch agent
-            if let Some(ac) = config.agents.get(*agent_name) {
-                ghostty.send_text(&format!("{}\n", ac.command))?;
+            if let Some(spirit) = restored.agents.get_mut(agent_name) {
+                spirit.pane_id = Some(current_terminal.clone());
+            }
+            if let Some(ac) = config.agents.get(agent_name) {
+                let cmd = agent::build_launch_command(ac, None);
+                ghostty.send_text(&current_terminal, &format!("{}\n", cmd))?;
             }
             println!("  Restored {} in Q{}", agent_name, q.quadrant);
         }
-        ghostty.split_down()?;
+
+        if let Some(last_agent) = agents.last() {
+            if let Some(shell_target) = restored.pane_id(last_agent) {
+                let _ = ghostty.split_down(shell_target)?;
+            }
+        }
+
+        store.add_quadrant(&session_id, restored)?;
     }
 
     store.set_status(&session_id, SessionStatus::Active)?;

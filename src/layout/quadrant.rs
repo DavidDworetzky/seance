@@ -10,22 +10,19 @@ pub struct WindowBounds {
 }
 
 pub struct QuadrantAssigner {
-    occupied: Vec<u8>,
     max_quadrants: u8,
 }
 
 impl QuadrantAssigner {
-    pub fn new(store: &SessionStore, max_quadrants: u8) -> Self {
-        Self {
-            occupied: store.active_quadrants().iter().map(|q| q.quadrant).collect(),
-            max_quadrants,
-        }
+    pub fn new(_store: &SessionStore, max_quadrants: u8) -> Self {
+        Self { max_quadrants }
     }
 
     /// Return the next available quadrant on a given monitor.
-    pub fn next_available(&self, _monitor: u8) -> u8 {
+    pub fn next_available_for(&self, store: &SessionStore, monitor: u8) -> u8 {
+        let occupied = store.occupied_quadrants(monitor);
         for q in 1..=self.max_quadrants {
-            if !self.occupied.contains(&q) {
+            if !occupied.contains(&q) {
                 return q;
             }
         }
@@ -48,22 +45,22 @@ pub fn compute_bounds(quadrant: u8, monitor: u8, config: &Config) -> WindowBound
 
     let gap = config.monitors.gap as i32;
 
-    // Map quadrant to row/col (1-indexed quadrant -> 0-indexed grid)
-    let q = ((quadrant - 1) % 4) as i32;
+    let rows = i32::from(config.quadrants_per_monitor.max(1).div_ceil(2));
+    let q = i32::from(quadrant.saturating_sub(1));
     let col = q % 2;
     let row = q / 2;
 
     let half_w = (display.width - gap * 3) / 2;
-    let half_h = (display.height - gap * 3) / 2;
+    let cell_h = (display.height - gap * (rows + 1)) / rows.max(1);
 
     let x = display.x + gap + col * (half_w + gap);
-    let y = display.y + gap + row * (half_h + gap);
+    let y = display.y + gap + row * (cell_h + gap);
 
     WindowBounds {
         x,
         y,
         width: half_w,
-        height: half_h,
+        height: cell_h,
     }
 }
 
@@ -97,10 +94,22 @@ mod tests {
             let col = idx % 2;
             let row = idx / 2;
             match q {
-                1 => { assert_eq!(col, 0); assert_eq!(row, 0); }
-                2 => { assert_eq!(col, 1); assert_eq!(row, 0); }
-                3 => { assert_eq!(col, 0); assert_eq!(row, 1); }
-                4 => { assert_eq!(col, 1); assert_eq!(row, 1); }
+                1 => {
+                    assert_eq!(col, 0);
+                    assert_eq!(row, 0);
+                }
+                2 => {
+                    assert_eq!(col, 1);
+                    assert_eq!(row, 0);
+                }
+                3 => {
+                    assert_eq!(col, 0);
+                    assert_eq!(row, 1);
+                }
+                4 => {
+                    assert_eq!(col, 1);
+                    assert_eq!(row, 1);
+                }
                 _ => unreachable!(),
             }
         }
@@ -110,7 +119,7 @@ mod tests {
     fn test_assigner_next_available() {
         let store = SessionStore::empty();
         let assigner = QuadrantAssigner::new(&store, 4);
-        assert_eq!(assigner.next_available(0), 1);
+        assert_eq!(assigner.next_available_for(&store, 0), 1);
     }
 
     #[test]
@@ -125,13 +134,25 @@ mod tests {
             created_at: "now".into(),
             slept_at: None,
             quadrants: vec![
-                crate::session::store::new_quadrant_state(1, 0, "b1", "/tmp/b1".into(), &["claude".into()]),
-                crate::session::store::new_quadrant_state(2, 0, "b2", "/tmp/b2".into(), &["claude".into()]),
+                crate::session::store::new_quadrant_state(
+                    1,
+                    0,
+                    "b1",
+                    "/tmp/b1".into(),
+                    &["claude".into()],
+                ),
+                crate::session::store::new_quadrant_state(
+                    2,
+                    0,
+                    "b2",
+                    "/tmp/b2".into(),
+                    &["claude".into()],
+                ),
             ],
         };
         store.sessions.push(session);
 
         let assigner = QuadrantAssigner::new(&store, 4);
-        assert_eq!(assigner.next_available(0), 3);
+        assert_eq!(assigner.next_available_for(&store, 0), 3);
     }
 }

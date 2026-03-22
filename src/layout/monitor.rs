@@ -27,7 +27,12 @@ pub fn detect_displays() -> Vec<DisplayInfo> {
 
 /// Create a DisplayInfo with specific dimensions (for testing or manual config).
 pub fn manual_display(x: i32, y: i32, width: i32, height: i32) -> DisplayInfo {
-    DisplayInfo { x, y, width, height }
+    DisplayInfo {
+        x,
+        y,
+        width,
+        height,
+    }
 }
 
 fn detect_via_applescript() -> anyhow::Result<Vec<DisplayInfo>> {

@@ -19,11 +19,22 @@ pub struct CheckoutArgs {
 pub async fn run(args: CheckoutArgs) -> Result<()> {
     // Use gh CLI to get PR branch
     let output = std::process::Command::new("gh")
-        .args(["pr", "view", &args.pr.to_string(), "--json", "headRefName", "-q", ".headRefName"])
+        .args([
+            "pr",
+            "view",
+            &args.pr.to_string(),
+            "--json",
+            "headRefName",
+            "-q",
+            ".headRefName",
+        ])
         .output()?;
 
     if !output.status.success() {
-        anyhow::bail!("Failed to get PR branch: {}", String::from_utf8_lossy(&output.stderr));
+        anyhow::bail!(
+            "Failed to get PR branch: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     let branch = String::from_utf8(output.stdout)?.trim().to_string();

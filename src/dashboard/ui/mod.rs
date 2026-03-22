@@ -19,9 +19,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(3),  // header
-            Constraint::Min(8),    // spirit table
+            Constraint::Min(8),     // spirit table
             Constraint::Length(12), // preview
-            Constraint::Length(1), // status bar
+            Constraint::Length(1),  // status bar
         ])
         .split(frame.area());
 
@@ -38,9 +38,16 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
         .map(|q| q.branch.as_str())
         .unwrap_or("no session");
 
-    let header = Paragraph::new(format!("  seance                              session: {}", session_name))
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .block(Block::default().borders(Borders::BOTTOM));
+    let header = Paragraph::new(format!(
+        "  seance                              session: {}",
+        session_name
+    ))
+    .style(
+        Style::default()
+            .fg(Color::Cyan)
+            .add_modifier(Modifier::BOLD),
+    )
+    .block(Block::default().borders(Borders::BOTTOM));
 
     frame.render_widget(header, area);
 }
@@ -57,7 +64,13 @@ fn render_spirit_table(frame: &mut Frame, area: Rect, app: &mut App) {
 
     let header_cells = ["Q", "Branch", "Claude", "Codex", "PR", "Mon"]
         .iter()
-        .map(|h| Cell::from(*h).style(Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+        .map(|h| {
+            Cell::from(*h).style(
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )
+        });
     let header = Row::new(header_cells).height(1);
 
     let rows: Vec<Row> = app
@@ -66,7 +79,9 @@ fn render_spirit_table(frame: &mut Frame, area: Rect, app: &mut App) {
         .enumerate()
         .map(|(i, q)| {
             let style = if i == app.selected {
-                Style::default().fg(Color::White).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(Color::White)
+                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray)
             };
@@ -128,11 +143,7 @@ fn render_preview(frame: &mut Frame, area: Rect, app: &App) {
         " preview ".to_string()
     };
 
-    let mode_indicator = if app.input_mode {
-        " [INPUT MODE] "
-    } else {
-        ""
-    };
+    let mode_indicator = if app.input_mode { " [INPUT MODE] " } else { "" };
 
     let content = if app.preview_content.is_empty() {
         "No output captured yet.".to_string()
@@ -167,8 +178,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         "j/k: navigate  Enter: jump  Tab: toggle agent  i: input  m: merge  d: diff  q: quit  ?: help"
     };
 
-    let bar = Paragraph::new(help)
-        .style(Style::default().fg(Color::DarkGray));
+    let bar = Paragraph::new(help).style(Style::default().fg(Color::DarkGray));
 
     frame.render_widget(bar, area);
 }
