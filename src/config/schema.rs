@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::agent::{claude, codex};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
@@ -62,16 +64,16 @@ impl Default for Config {
                 (
                     "claude".into(),
                     AgentConfig {
-                        command: "claude".into(),
+                        command: claude::COMMAND.into(),
                         prompt_injection: PromptInjection::Trailing,
                         auto_name: true,
-                        auto_name_command: None,
+                        auto_name_command: Some(claude::AUTO_NAME_COMMAND.into()),
                     },
                 ),
                 (
                     "codex".into(),
                     AgentConfig {
-                        command: "codex".into(),
+                        command: codex::COMMAND.into(),
                         prompt_injection: PromptInjection::Flag,
                         auto_name: false,
                         auto_name_command: None,
@@ -264,13 +266,13 @@ mod tests {
     #[test]
     fn test_default_agents_config() {
         let config = Config::default();
-        let claude = config.agents.get("claude").unwrap();
-        assert_eq!(claude.command, "claude");
-        assert!(claude.auto_name);
+        let claude_agent = config.agents.get("claude").unwrap();
+        assert_eq!(claude_agent.command, claude::COMMAND);
+        assert!(claude_agent.auto_name);
 
-        let codex = config.agents.get("codex").unwrap();
-        assert_eq!(codex.command, "codex");
-        assert!(!codex.auto_name);
+        let codex_agent = config.agents.get("codex").unwrap();
+        assert_eq!(codex_agent.command, codex::COMMAND);
+        assert!(!codex_agent.auto_name);
     }
 
     #[test]

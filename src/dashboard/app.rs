@@ -45,21 +45,23 @@ impl App {
                 KeyCode::Char(c) => {
                     // Send character to the selected spirit's pane
                     if let Some(q) = self.quadrants.get(self.selected) {
-                        let agents: Vec<&String> = q.agents.keys().collect();
+                        let agents = q.ordered_agent_names(&self.config.group);
                         if let Some(agent_name) = agents.get(self.preview_agent) {
-                            let ghostty = crate::ghostty::GhosttyBackend::new();
-                            let title = q.window_title(agent_name);
-                            let _ = ghostty.send_text_to_window(&title, &c.to_string());
+                            if let Some(pane_id) = q.pane_id(agent_name) {
+                                let ghostty = crate::ghostty::GhosttyBackend::new();
+                                let _ = ghostty.send_text(pane_id, &c.to_string());
+                            }
                         }
                     }
                 }
                 KeyCode::Enter => {
                     if let Some(q) = self.quadrants.get(self.selected) {
-                        let agents: Vec<&String> = q.agents.keys().collect();
+                        let agents = q.ordered_agent_names(&self.config.group);
                         if let Some(agent_name) = agents.get(self.preview_agent) {
-                            let ghostty = crate::ghostty::GhosttyBackend::new();
-                            let title = q.window_title(agent_name);
-                            let _ = ghostty.send_text_to_window(&title, "\n");
+                            if let Some(pane_id) = q.pane_id(agent_name) {
+                                let ghostty = crate::ghostty::GhosttyBackend::new();
+                                let _ = ghostty.send_text(pane_id, "\n");
+                            }
                         }
                     }
                 }
@@ -73,11 +75,16 @@ impl App {
             KeyCode::Char('j') | KeyCode::Down => {
                 if !self.quadrants.is_empty() {
                     self.selected = (self.selected + 1) % self.quadrants.len();
+                    self.clamp_preview_agent();
                 }
             }
             KeyCode::Char('k') | KeyCode::Up => {
                 if !self.quadrants.is_empty() {
-                    self.selected = self.selected.checked_sub(1).unwrap_or(self.quadrants.len() - 1);
+                    self.selected = self
+                        .selected
+                        .checked_sub(1)
+                        .unwrap_or(self.quadrants.len() - 1);
+                    self.clamp_preview_agent();
                 }
             }
             KeyCode::Tab => {
@@ -85,16 +92,18 @@ impl App {
                 let agent_count = self
                     .quadrants
                     .get(self.selected)
-                    .map(|q| q.agents.len())
-                    .unwrap_or(1);
+                    .map(|q| q.ordered_agent_names(&self.config.group).len())
+                    .unwrap_or(1)
+                    .max(1);
                 self.preview_agent = (self.preview_agent + 1) % agent_count;
             }
             KeyCode::Enter => {
                 // Jump to the quadrant's Ghostty window
                 if let Some(q) = self.quadrants.get(self.selected) {
-                    let ghostty = crate::ghostty::GhosttyBackend::new();
-                    let title = format!("seance-q{}", q.quadrant);
-                    let _ = ghostty.focus_window(&title);
+                    if let Some(window_id) = q.window_id.as_deref() {
+                        let ghostty = crate::ghostty::GhosttyBackend::new();
+                        let _ = ghostty.focus_window(window_id);
+                    }
                 }
             }
             KeyCode::Char('i') => {
@@ -113,15 +122,28 @@ impl App {
                 // TODO: diff view
             }
             KeyCode::Char(c @ '1'..='8') => {
-                let n = c.to_digit(10).unwrap_or(1) as usize;
-                if n > 0 && n <= self.quadrants.len() {
-                    self.selected = n - 1;
+                let n = c.to_digit(10).unwrap_or(1) as u8;
+                if let Some(index) = self.quadrants.iter().position(|q| q.quadrant == n) {
+                    self.selected = index;
+                    self.clamp_preview_agent();
                 }
             }
             _ => {}
         }
 
         Ok(false)
+    }
+
+    fn clamp_preview_agent(&mut self) {
+        let count = self
+            .quadrants
+            .get(self.selected)
+            .map(|q| q.ordered_agent_names(&self.config.group).len())
+            .unwrap_or(1)
+            .max(1);
+        if self.preview_agent >= count {
+            self.preview_agent = 0;
+        }
     }
 
     /// Periodic refresh of spirit status.
@@ -134,14 +156,19 @@ impl App {
         // Reload session store
         let store = SessionStore::load()?;
         self.quadrants = store.active_quadrants();
+        if self.selected >= self.quadrants.len() && !self.quadrants.is_empty() {
+            self.selected = self.quadrants.len() - 1;
+        }
+        self.clamp_preview_agent();
 
         // Update preview content
         if let Some(q) = self.quadrants.get(self.selected) {
-            let agents: Vec<&String> = q.agents.keys().collect();
+            let agents = q.ordered_agent_names(&self.config.group);
             if let Some(agent_name) = agents.get(self.preview_agent) {
-                let ghostty = crate::ghostty::GhosttyBackend::new();
-                let title = q.window_title(agent_name);
-                self.preview_content = ghostty.capture_pane(&title).unwrap_or_default();
+                if let Some(pane_id) = q.pane_id(agent_name) {
+                    let ghostty = crate::ghostty::GhosttyBackend::new();
+                    self.preview_content = ghostty.capture_pane(pane_id).unwrap_or_default();
+                }
             }
         }
 

@@ -51,12 +51,14 @@ pub async fn run(args: SendArgs) -> Result<()> {
 
     let agents_to_send: Vec<String> = match agent_filter {
         Some(name) => vec![name],
-        None => config.group.clone(),
+        None => quadrant.ordered_agent_names(&config.group),
     };
 
     for agent_name in &agents_to_send {
-        let title = quadrant.window_title(agent_name);
-        ghostty.send_text_to_window(&title, &text)?;
+        let pane_id = quadrant.pane_id(agent_name).ok_or_else(|| {
+            anyhow::anyhow!("No pane id recorded for Q{}:{}", quadrant_num, agent_name)
+        })?;
+        ghostty.send_text(pane_id, &text)?;
         println!("Sent to Q{}:{}", quadrant_num, agent_name);
     }
 

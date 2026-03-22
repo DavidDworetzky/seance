@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 use schema::Config;
+use serde_yaml::Value;
 
 const PROJECT_CONFIG_NAME: &str = ".seance.yaml";
 const GLOBAL_CONFIG_DIR: &str = "seance";
@@ -13,25 +14,25 @@ impl Config {
     /// then falling back to ~/.config/seance/config.yaml.
     /// Missing config files are not an error — returns defaults.
     pub fn load(start_dir: Option<&Path>) -> Result<Self> {
-        let project_config = start_dir
-            .map(|d| find_config_upward(d))
-            .unwrap_or_else(|| {
-                std::env::current_dir()
-                    .ok()
-                    .and_then(|d| find_config_upward(&d))
-            });
+        let project_config = start_dir.map(|d| find_config_upward(d)).unwrap_or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .and_then(|d| find_config_upward(&d))
+        });
 
         let global_config = global_config_path();
 
-        let mut config = Config::default();
+        let mut merged = serde_yaml::to_value(Config::default())
+            .with_context(|| "serializing default config")?;
 
         // Load global first (lower priority)
         if let Some(path) = &global_config {
             if path.exists() {
                 let contents = std::fs::read_to_string(path)
                     .with_context(|| format!("reading global config: {}", path.display()))?;
-                config = serde_yaml::from_str(&contents)
+                let value: Value = serde_yaml::from_str(&contents)
                     .with_context(|| format!("parsing global config: {}", path.display()))?;
+                merge_values(&mut merged, value);
             }
         }
 
@@ -40,12 +41,13 @@ impl Config {
             if path.exists() {
                 let contents = std::fs::read_to_string(path)
                     .with_context(|| format!("reading project config: {}", path.display()))?;
-                config = serde_yaml::from_str(&contents)
+                let value: Value = serde_yaml::from_str(&contents)
                     .with_context(|| format!("parsing project config: {}", path.display()))?;
+                merge_values(&mut merged, value);
             }
         }
 
-        Ok(config)
+        serde_yaml::from_value(merged).with_context(|| "building merged config")
     }
 }
 
@@ -64,6 +66,22 @@ fn find_config_upward(start: &Path) -> Option<PathBuf> {
 
 fn global_config_path() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join(GLOBAL_CONFIG_DIR).join("config.yaml"))
+}
+
+fn merge_values(base: &mut Value, overlay: Value) {
+    match (base, overlay) {
+        (Value::Mapping(base_map), Value::Mapping(overlay_map)) => {
+            for (key, value) in overlay_map {
+                match base_map.get_mut(&key) {
+                    Some(existing) => merge_values(existing, value),
+                    None => {
+                        base_map.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base_slot, overlay_value) => *base_slot = overlay_value,
+    }
 }
 
 #[cfg(test)]

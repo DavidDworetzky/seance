@@ -46,6 +46,8 @@ pub async fn run(args: CloseArgs) -> Result<()> {
     println!("Merged {} using {:?} strategy", args.branch, strategy);
 
     if !args.keep {
+        let quadrant = store.find_quadrant(&args.branch);
+
         // 3. Remove worktree
         crate::git::worktree::remove(&config, &args.branch)?;
 
@@ -53,8 +55,10 @@ pub async fn run(args: CloseArgs) -> Result<()> {
         crate::git::branch::delete(&args.branch)?;
 
         // 5. Close Ghostty window
-        if let Err(e) = ghostty.close_window(&args.branch) {
-            tracing::warn!("Could not close window: {}", e);
+        if let Some(window_id) = quadrant.as_ref().and_then(|q| q.window_id.as_deref()) {
+            if let Err(e) = ghostty.close_window(window_id) {
+                tracing::warn!("Could not close window: {}", e);
+            }
         }
 
         // 6. Remove from session store

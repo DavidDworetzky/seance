@@ -56,26 +56,65 @@ pub async fn run(args: AddArgs) -> Result<()> {
     let mut store = SessionStore::load()?;
     let ghostty = GhosttyBackend::new();
     let assigner = QuadrantAssigner::new(&store, config.quadrants_per_monitor);
+    let prompt_content =
+        crate::agent::prompt::resolve_prompt(args.prompt.as_deref(), args.prompt_file.as_deref())?;
 
     let repo_path = std::env::current_dir()?.to_string_lossy().to_string();
-    let session_name = args.branch.as_deref().unwrap_or("seance");
+    let auto_name_requested = args.auto_name || config.auto_name.enabled;
+    let branch_seed = match args.branch.clone() {
+        Some(branch) => Some(branch),
+        None if auto_name_requested => {
+            let prompt = prompt_content
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("--auto-name requires --prompt or --prompt-file"))?;
+            Some(agent::generate_branch_name(&config, prompt)?)
+        }
+        None => None,
+    };
+
+    let session_name = branch_seed.as_deref().unwrap_or("seance");
     let session_id = store.ensure_active_session(session_name, &repo_path)?;
 
     if args.circle {
         let count = config.quadrants_per_monitor;
-        println!("Creating circle with {} worktrees on monitor {}...", count, args.monitor);
+        println!(
+            "Creating circle with {} worktrees on monitor {}...",
+            count, args.monitor
+        );
 
         for q in 1..=count {
-            let branch = match &args.branch {
-                Some(b) => format!("{}-{}", b, q),
-                None => format!("seance-{}", q),
-            };
-            create_quadrant(&config, &ghostty, &mut store, &session_id, &branch, q, args.monitor, &args)?;
+            let branch = branch_seed
+                .as_deref()
+                .map(|seed| format!("{}-{}", seed, q))
+                .unwrap_or_else(|| format!("seance-{}", q));
+            create_quadrant(
+                &config,
+                &ghostty,
+                &mut store,
+                &session_id,
+                &branch,
+                q,
+                args.monitor,
+                &args,
+                prompt_content.as_deref(),
+            )?;
         }
     } else {
-        let branch = args.branch.clone().unwrap_or_else(|| "seance-1".into());
-        let quadrant = args.quadrant.unwrap_or_else(|| assigner.next_available(args.monitor));
-        create_quadrant(&config, &ghostty, &mut store, &session_id, &branch, quadrant, args.monitor, &args)?;
+        let branch = branch_seed.unwrap_or_else(|| "seance-1".into());
+        let quadrant = args
+            .quadrant
+            .unwrap_or_else(|| assigner.next_available_for(&store, args.monitor));
+        create_quadrant(
+            &config,
+            &ghostty,
+            &mut store,
+            &session_id,
+            &branch,
+            quadrant,
+            args.monitor,
+            &args,
+            prompt_content.as_deref(),
+        )?;
     }
 
     Ok(())
@@ -90,6 +129,7 @@ fn create_quadrant(
     quadrant: u8,
     monitor: u8,
     args: &AddArgs,
+    prompt_content: Option<&str>,
 ) -> Result<()> {
     let base = args
         .base
@@ -119,36 +159,42 @@ fn create_quadrant(
     };
 
     // 5. Resolve prompt if provided
-    let prompt_file = if let Some(ref text) = args.prompt {
-        Some(crate::agent::prompt::write_prompt_file(&wt_path, branch, text)?)
-    } else if let Some(ref path) = args.prompt_file {
-        let content = std::fs::read_to_string(path)?;
-        Some(crate::agent::prompt::write_prompt_file(&wt_path, branch, &content)?)
-    } else {
-        None
-    };
+    let prompt_file = prompt_content
+        .map(|content| crate::agent::prompt::write_prompt_file(&wt_path, branch, content))
+        .transpose()?;
 
     // 6. Open Ghostty window in quadrant
     let bounds = crate::layout::quadrant::compute_bounds(quadrant, monitor, config);
-    ghostty.create_window(&wt_path, &bounds)?;
+    let window = ghostty.create_window(&wt_path, &bounds)?;
 
     // 7. Split panes for each agent + launch
+    let mut current_terminal = window.terminal_id.clone();
+    let mut pane_ids = Vec::with_capacity(agents.len());
     for (i, agent_name) in agents.iter().enumerate() {
         if i > 0 {
-            ghostty.split_right()?;
+            current_terminal = ghostty.split_right(&current_terminal)?;
         }
         if let Some(ac) = config.agents.get(agent_name) {
             let cmd = agent::build_launch_command(ac, prompt_file.as_deref());
-            ghostty.send_text(&format!("{}\n", cmd))?;
+            ghostty.send_text(&current_terminal, &format!("{}\n", cmd))?;
         }
+        pane_ids.push((agent_name.clone(), current_terminal.clone()));
         println!("  Started {} in Q{}", agent_name, quadrant);
     }
 
     // 8. Shell pane at the bottom
-    ghostty.split_down()?;
+    if let Some((_, terminal_id)) = pane_ids.last() {
+        let _ = ghostty.split_down(terminal_id)?;
+    }
 
     // 9. Register in session store
-    let quadrant_state = store::new_quadrant_state(quadrant, monitor, branch, wt_path, &agents);
+    let mut quadrant_state = store::new_quadrant_state(quadrant, monitor, branch, wt_path, &agents);
+    quadrant_state.window_id = Some(window.window_id);
+    for (agent_name, pane_id) in pane_ids {
+        if let Some(spirit) = quadrant_state.agents.get_mut(&agent_name) {
+            spirit.pane_id = Some(pane_id);
+        }
+    }
     store.add_quadrant(session_id, quadrant_state)?;
 
     println!("  Q{} ready on monitor {}", quadrant, monitor);
