@@ -30,7 +30,10 @@ pub async fn run(args: ListArgs) -> Result<()> {
         .map(|name| format!("{:<10}", name))
         .collect();
 
-    println!("{:<4} {:<30} {}  {:<8} {:<4}", "Q", "Branch", agent_headers, "PR", "Mon");
+    println!(
+        "{:<4} {:<30} {}  {:<8} {:<4}",
+        "Q", "Branch", agent_headers, "PR", "Mon"
+    );
     println!("{}", "-".repeat(75));
 
     for q in &quadrants {
@@ -65,7 +68,16 @@ fn fetch_pr_status(store: &mut crate::session::store::SessionStore) -> Result<()
     for session in &mut store.sessions {
         for q in &mut session.quadrants {
             let output = std::process::Command::new("gh")
-                .args(["pr", "list", "--head", &q.branch, "--json", "number,state", "--limit", "1"])
+                .args([
+                    "pr",
+                    "list",
+                    "--head",
+                    &q.branch,
+                    "--json",
+                    "number,state",
+                    "--limit",
+                    "1",
+                ])
                 .output();
 
             if let Ok(output) = output {

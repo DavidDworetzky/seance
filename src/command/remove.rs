@@ -45,10 +45,12 @@ fn remove_one(
     quadrant: &crate::session::store::QuadrantState,
 ) -> Result<()> {
     // Close Ghostty window
-    if let Some(window_id) = quadrant.window_id.as_deref() {
-        if let Err(e) = ghostty.close_window(window_id) {
-            tracing::warn!("Could not close window for {}: {}", quadrant.branch, e);
-        }
+    let close_result = match quadrant.window_id.as_deref() {
+        Some(window_id) => ghostty.close_window(window_id),
+        None => ghostty.close_window_title(&quadrant.main_window_title()),
+    };
+    if let Err(e) = close_result {
+        tracing::warn!("Could not close window for {}: {}", quadrant.branch, e);
     }
 
     // Remove worktree

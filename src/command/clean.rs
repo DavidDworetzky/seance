@@ -30,7 +30,9 @@ pub async fn run(args: CleanArgs) -> Result<()> {
                         .skip_while(|l| !l.starts_with(&format!("worktree {}", path)))
                         .find(|l| l.starts_with("branch "));
 
-                    if let Some(branch) = branch_line.and_then(|l| l.strip_prefix("branch refs/heads/")) {
+                    if let Some(branch) =
+                        branch_line.and_then(|l| l.strip_prefix("branch refs/heads/"))
+                    {
                         let remote_check = std::process::Command::new("git")
                             .args(["ls-remote", "--exit-code", "--heads", "origin", branch])
                             .output()?;

@@ -79,6 +79,19 @@ end tell"#,
     )
 }
 
+/// Send text to the first terminal in a window matched by title.
+pub fn send_text_to_window(window_title: &str, text: &str) -> String {
+    let escaped_text = text.replace('\\', "\\\\").replace('"', "\\\"");
+    let escaped_title = window_title.replace('"', "\\\"");
+    format!(
+        r#"tell application "Ghostty"
+    set targetWin to first window whose name contains "{}"
+    input text "{}" to terminal 1 of selected tab of targetWin
+end tell"#,
+        escaped_title, escaped_text,
+    )
+}
+
 /// Focus a window by id.
 pub fn focus_window(window_id: &str) -> String {
     format!(
@@ -88,6 +101,19 @@ pub fn focus_window(window_id: &str) -> String {
     set index of targetWin to 1
 end tell"#,
         window_id,
+    )
+}
+
+/// Focus a window by title.
+pub fn focus_window_title(window_title: &str) -> String {
+    let escaped = window_title.replace('"', "\\\"");
+    format!(
+        r#"tell application "Ghostty"
+    activate
+    set targetWin to first window whose name contains "{}"
+    set index of targetWin to 1
+end tell"#,
+        escaped,
     )
 }
 
@@ -102,6 +128,18 @@ end tell"#,
     )
 }
 
+/// Close a window by title.
+pub fn close_window_title(window_title: &str) -> String {
+    let escaped = window_title.replace('"', "\\\"");
+    format!(
+        r#"tell application "Ghostty"
+    set targetWin to first window whose name contains "{}"
+    close targetWin
+end tell"#,
+        escaped,
+    )
+}
+
 /// Capture pane content from a terminal.
 /// Note: Ghostty's AppleScript API for text capture may need adaptation
 /// based on the exact object model in your Ghostty version.
@@ -112,6 +150,19 @@ pub fn capture_pane(terminal_id: &str) -> String {
     return text of targetTerminal
 end tell"#,
         terminal_id,
+    )
+}
+
+/// Capture pane content from the first terminal in a window matched by title.
+pub fn capture_pane_title(window_title: &str) -> String {
+    let escaped = window_title.replace('"', "\\\"");
+    format!(
+        r#"tell application "Ghostty"
+    set targetWin to first window whose name contains "{}"
+    set targetTerminal to terminal 1 of selected tab of targetWin
+    return text of targetTerminal
+end tell"#,
+        escaped,
     )
 }
 
@@ -169,6 +220,13 @@ mod tests {
     }
 
     #[test]
+    fn test_focus_window_title_script() {
+        let script = focus_window_title("seance-q1");
+        assert!(script.contains("name contains \"seance-q1\""));
+        assert!(script.contains("set index"));
+    }
+
+    #[test]
     fn test_close_window_script() {
         let script = close_window("456");
         assert!(script.contains("close targetWin"));
@@ -183,10 +241,31 @@ mod tests {
     }
 
     #[test]
+    fn test_send_text_to_window_script() {
+        let script = send_text_to_window("seance-q1-claude", "hello world");
+        assert!(script.contains("name contains \"seance-q1-claude\""));
+        assert!(script.contains("hello world"));
+    }
+
+    #[test]
     fn test_capture_pane_script() {
         let script = capture_pane("123");
         assert!(script.contains("id is 123"));
         assert!(script.contains("return text"));
+    }
+
+    #[test]
+    fn test_capture_pane_title_script() {
+        let script = capture_pane_title("seance-q1-claude");
+        assert!(script.contains("name contains \"seance-q1-claude\""));
+        assert!(script.contains("return text"));
+    }
+
+    #[test]
+    fn test_close_window_title_script() {
+        let script = close_window_title("seance-q2");
+        assert!(script.contains("name contains \"seance-q2\""));
+        assert!(script.contains("close targetWin"));
     }
 
     #[test]

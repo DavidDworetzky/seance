@@ -3,7 +3,11 @@ use anyhow::{Context, Result};
 use crate::config::schema::MergeStrategy;
 
 /// Execute a merge using the specified strategy.
-pub fn run(config: &crate::config::schema::Config, branch: &str, strategy: &MergeStrategy) -> Result<()> {
+pub fn run(
+    config: &crate::config::schema::Config,
+    branch: &str,
+    strategy: &MergeStrategy,
+) -> Result<()> {
     let main = config.base_branch.as_deref().unwrap_or(&config.main_branch);
 
     // Checkout main branch first

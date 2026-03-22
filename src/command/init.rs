@@ -92,21 +92,21 @@ group:
 
 agents:
   claude:
-    command: "{}"
+    command: {}
     prompt_injection: trailing
     auto_name: true
-    auto_name_command: "{}"
+    auto_name_command: {}
   codex:
-    command: "{}"
+    command: {}
     prompt_injection: flag
     auto_name: false
 
 merge_strategy: squash
 "#,
         main_branch,
-        crate::agent::claude::COMMAND,
-        crate::agent::claude::AUTO_NAME_COMMAND,
-        crate::agent::codex::COMMAND,
+        yaml_quote(crate::agent::claude::COMMAND),
+        yaml_quote(crate::agent::claude::AUTO_NAME_COMMAND),
+        yaml_quote(crate::agent::codex::COMMAND),
     );
 
     // Add project-specific hooks and file ops
@@ -148,6 +148,10 @@ files:
     }
 
     config
+}
+
+fn yaml_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
 }
 
 fn install_keybindings() -> Result<()> {
@@ -194,4 +198,23 @@ keybind = ctrl+s>p=text:seance focus --prev\n
     println!("Installed keybindings to {}", ghostty_config.display());
     println!("Reload Ghostty config to activate.");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_yaml_quote() {
+        assert_eq!(yaml_quote("codex"), "'codex'");
+        assert_eq!(yaml_quote("it's"), "'it''s'");
+    }
+
+    #[test]
+    fn test_generate_default_config_is_parseable() {
+        let yaml = generate_default_config("main", "Unknown");
+        let parsed: crate::config::schema::Config = serde_yaml::from_str(&yaml).unwrap();
+        let codex = parsed.agents.get("codex").unwrap();
+        assert_eq!(codex.command, crate::agent::codex::COMMAND);
+    }
 }

@@ -47,10 +47,14 @@ impl App {
                     if let Some(q) = self.quadrants.get(self.selected) {
                         let agents = q.ordered_agent_names(&self.config.group);
                         if let Some(agent_name) = agents.get(self.preview_agent) {
-                            if let Some(pane_id) = q.pane_id(agent_name) {
-                                let ghostty = crate::ghostty::GhosttyBackend::new();
-                                let _ = ghostty.send_text(pane_id, &c.to_string());
-                            }
+                            let ghostty = crate::ghostty::GhosttyBackend::new();
+                            let _ = match q.pane_id(agent_name) {
+                                Some(pane_id) => ghostty.send_text(pane_id, &c.to_string()),
+                                None => ghostty.send_text_to_window(
+                                    &q.window_title(agent_name),
+                                    &c.to_string(),
+                                ),
+                            };
                         }
                     }
                 }
@@ -58,10 +62,13 @@ impl App {
                     if let Some(q) = self.quadrants.get(self.selected) {
                         let agents = q.ordered_agent_names(&self.config.group);
                         if let Some(agent_name) = agents.get(self.preview_agent) {
-                            if let Some(pane_id) = q.pane_id(agent_name) {
-                                let ghostty = crate::ghostty::GhosttyBackend::new();
-                                let _ = ghostty.send_text(pane_id, "\n");
-                            }
+                            let ghostty = crate::ghostty::GhosttyBackend::new();
+                            let _ = match q.pane_id(agent_name) {
+                                Some(pane_id) => ghostty.send_text(pane_id, "\n"),
+                                None => {
+                                    ghostty.send_text_to_window(&q.window_title(agent_name), "\n")
+                                }
+                            };
                         }
                     }
                 }
@@ -100,10 +107,11 @@ impl App {
             KeyCode::Enter => {
                 // Jump to the quadrant's Ghostty window
                 if let Some(q) = self.quadrants.get(self.selected) {
-                    if let Some(window_id) = q.window_id.as_deref() {
-                        let ghostty = crate::ghostty::GhosttyBackend::new();
-                        let _ = ghostty.focus_window(window_id);
-                    }
+                    let ghostty = crate::ghostty::GhosttyBackend::new();
+                    let _ = match q.window_id.as_deref() {
+                        Some(window_id) => ghostty.focus_window(window_id),
+                        None => ghostty.focus_window_title(&q.main_window_title()),
+                    };
                 }
             }
             KeyCode::Char('i') => {
@@ -165,10 +173,13 @@ impl App {
         if let Some(q) = self.quadrants.get(self.selected) {
             let agents = q.ordered_agent_names(&self.config.group);
             if let Some(agent_name) = agents.get(self.preview_agent) {
-                if let Some(pane_id) = q.pane_id(agent_name) {
-                    let ghostty = crate::ghostty::GhosttyBackend::new();
-                    self.preview_content = ghostty.capture_pane(pane_id).unwrap_or_default();
-                }
+                let ghostty = crate::ghostty::GhosttyBackend::new();
+                self.preview_content = match q.pane_id(agent_name) {
+                    Some(pane_id) => ghostty.capture_pane(pane_id).unwrap_or_default(),
+                    None => ghostty
+                        .capture_pane_title(&q.window_title(agent_name))
+                        .unwrap_or_default(),
+                };
             }
         }
 

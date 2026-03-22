@@ -59,9 +59,21 @@ impl GhosttyBackend {
         applescript::run(&script)
     }
 
+    /// Send text to the first pane in a window matched by title.
+    pub fn send_text_to_window(&self, window_title: &str, text: &str) -> Result<()> {
+        let script = applescript::send_text_to_window(window_title, text);
+        applescript::run(&script)
+    }
+
     /// Focus a window by id.
     pub fn focus_window(&self, window_id: &str) -> Result<()> {
         let script = applescript::focus_window(window_id);
+        applescript::run(&script)
+    }
+
+    /// Focus a window by title.
+    pub fn focus_window_title(&self, window_title: &str) -> Result<()> {
+        let script = applescript::focus_window_title(window_title);
         applescript::run(&script)
     }
 
@@ -71,9 +83,21 @@ impl GhosttyBackend {
         applescript::run(&script)
     }
 
+    /// Close a window by title.
+    pub fn close_window_title(&self, window_title: &str) -> Result<()> {
+        let script = applescript::close_window_title(window_title);
+        applescript::run(&script)
+    }
+
     /// Capture terminal output from a pane.
     pub fn capture_pane(&self, terminal_id: &str) -> Result<String> {
         let script = applescript::capture_pane(terminal_id);
+        applescript::run_capture(&script)
+    }
+
+    /// Capture terminal output from the first pane in a window matched by title.
+    pub fn capture_pane_title(&self, window_title: &str) -> Result<String> {
+        let script = applescript::capture_pane_title(window_title);
         applescript::run_capture(&script)
     }
 

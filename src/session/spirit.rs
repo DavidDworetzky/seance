@@ -5,6 +5,7 @@ use crate::config::schema::StatusIcons;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpiritState {
     pub status: SpiritStatus,
+    #[serde(default)]
     pub pane_id: Option<String>,
     pub last_activity: Option<String>,
 }

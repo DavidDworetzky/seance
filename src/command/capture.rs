@@ -22,10 +22,11 @@ pub async fn run(args: CaptureArgs) -> Result<()> {
     let quadrant = store
         .find_quadrant(quadrant_str)
         .ok_or_else(|| anyhow::anyhow!("No active worktree in quadrant {}", quadrant_str))?;
-    let pane_id = quadrant
-        .pane_id(agent_name)
-        .ok_or_else(|| anyhow::anyhow!("No pane id recorded for {}", args.target))?;
-    let output = ghostty.capture_pane(pane_id)?;
+    let output = if let Some(pane_id) = quadrant.pane_id(agent_name) {
+        ghostty.capture_pane(pane_id)?
+    } else {
+        ghostty.capture_pane_title(&quadrant.window_title(agent_name))?
+    };
 
     // Take last N lines
     let lines: Vec<&str> = output.lines().collect();

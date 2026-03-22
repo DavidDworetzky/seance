@@ -36,12 +36,13 @@ pub async fn run(args: SleepArgs) -> Result<()> {
         let mut agent_names: Vec<String> = q.agents.keys().cloned().collect();
         agent_names.sort();
         for agent_name in agent_names {
-            let Some(pane_id) = q.pane_id(&agent_name) else {
-                tracing::warn!("Missing pane id for Q{}:{}", q.quadrant, agent_name);
-                continue;
+            let capture = if let Some(pane_id) = q.pane_id(&agent_name) {
+                ghostty.capture_pane(pane_id)
+            } else {
+                ghostty.capture_pane_title(&q.window_title(&agent_name))
             };
 
-            match ghostty.capture_pane(pane_id) {
+            match capture {
                 Ok(snapshot) => {
                     store.save_snapshot(&session_id, q.quadrant, &agent_name, &snapshot)?;
                     println!("  Captured Q{}:{}", q.quadrant, agent_name);
@@ -59,15 +60,12 @@ pub async fn run(args: SleepArgs) -> Result<()> {
     // Close windows unless --keep-windows
     if !args.keep_windows {
         for q in &quadrants {
-            let Some(window_id) = q.window_id.as_deref() else {
-                tracing::warn!(
-                    "Could not close window for Q{}: missing window id",
-                    q.quadrant
-                );
-                continue;
+            let close_result = match q.window_id.as_deref() {
+                Some(window_id) => ghostty.close_window(window_id),
+                None => ghostty.close_window_title(&q.main_window_title()),
             };
 
-            if let Err(e) = ghostty.close_window(window_id) {
+            if let Err(e) = close_result {
                 tracing::warn!("Could not close window for Q{}: {}", q.quadrant, e);
             }
         }

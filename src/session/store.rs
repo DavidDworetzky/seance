@@ -37,6 +37,7 @@ pub struct QuadrantState {
     pub monitor: u8,
     pub branch: String,
     pub worktree_path: PathBuf,
+    #[serde(default)]
     pub window_id: Option<String>,
     pub agents: HashMap<String, SpiritState>,
     pub pr_status: Option<String>,

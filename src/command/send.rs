@@ -55,10 +55,11 @@ pub async fn run(args: SendArgs) -> Result<()> {
     };
 
     for agent_name in &agents_to_send {
-        let pane_id = quadrant.pane_id(agent_name).ok_or_else(|| {
-            anyhow::anyhow!("No pane id recorded for Q{}:{}", quadrant_num, agent_name)
-        })?;
-        ghostty.send_text(pane_id, &text)?;
+        if let Some(pane_id) = quadrant.pane_id(agent_name) {
+            ghostty.send_text(pane_id, &text)?;
+        } else {
+            ghostty.send_text_to_window(&quadrant.window_title(agent_name), &text)?;
+        }
         println!("Sent to Q{}:{}", quadrant_num, agent_name);
     }
 

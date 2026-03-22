@@ -54,11 +54,10 @@ pub async fn run(args: FocusArgs) -> Result<()> {
             .ok_or_else(|| anyhow::anyhow!("No active worktree in quadrant {}", quadrant))?
     };
 
-    let window_id = q
-        .window_id
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("No window id recorded for Q{}", q.quadrant))?;
-    ghostty.focus_window(window_id)?;
+    match q.window_id.as_deref() {
+        Some(window_id) => ghostty.focus_window(window_id)?,
+        None => ghostty.focus_window_title(&q.main_window_title())?,
+    }
     println!("Focused Q{} ({})", q.quadrant, q.branch);
 
     Ok(())
