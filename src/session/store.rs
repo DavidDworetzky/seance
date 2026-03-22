@@ -9,6 +9,8 @@ use super::spirit::{SpiritState, SpiritStatus};
 pub struct SessionStore {
     pub sessions: Vec<Session>,
     pub current: Option<String>,
+    #[serde(skip)]
+    store_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +37,7 @@ pub struct QuadrantState {
     pub monitor: u8,
     pub branch: String,
     pub worktree_path: PathBuf,
+    pub window_id: Option<String>,
     pub agents: HashMap<String, SpiritState>,
     pub pr_status: Option<String>,
 }
@@ -54,6 +57,28 @@ impl QuadrantState {
 
     pub fn main_window_title(&self) -> String {
         format!("seance-q{}", self.quadrant)
+    }
+
+    pub fn ordered_agent_names(&self, preferred: &[String]) -> Vec<String> {
+        let mut names: Vec<String> = preferred
+            .iter()
+            .filter(|name| self.agents.contains_key(*name))
+            .cloned()
+            .collect();
+
+        let mut extras: Vec<String> = self
+            .agents
+            .keys()
+            .filter(|name| !preferred.contains(*name))
+            .cloned()
+            .collect();
+        extras.sort();
+        names.extend(extras);
+        names
+    }
+
+    pub fn pane_id(&self, agent_name: &str) -> Option<&str> {
+        self.agents.get(agent_name)?.pane_id.as_deref()
     }
 }
 
@@ -76,6 +101,15 @@ impl SessionStore {
         Self {
             sessions: vec![],
             current: None,
+            store_path: None,
+        }
+    }
+
+    fn with_store_path(path: PathBuf) -> Self {
+        Self {
+            sessions: vec![],
+            current: None,
+            store_path: Some(path),
         }
     }
 
@@ -83,21 +117,24 @@ impl SessionStore {
     pub fn load() -> Result<Self> {
         let path = Self::store_path()?;
         if !path.exists() {
-            return Ok(Self::empty());
+            return Ok(Self::with_store_path(path));
         }
 
         let contents = std::fs::read_to_string(&path)
             .with_context(|| format!("reading session store: {}", path.display()))?;
-        let store: Self = serde_json::from_str(&contents)
-            .with_context(|| "parsing session store")?;
+        let mut store: Self =
+            serde_json::from_str(&contents).with_context(|| "parsing session store")?;
+        store.store_path = Some(path);
         Ok(store)
     }
 
     /// Save to disk.
     pub fn save(&self) -> Result<()> {
-        let path = Self::store_path()?;
+        let Some(path) = self.store_path.as_ref() else {
+            return Ok(());
+        };
         let contents = serde_json::to_string_pretty(self)?;
-        std::fs::write(&path, contents)?;
+        std::fs::write(path, contents)?;
         Ok(())
     }
 
@@ -140,7 +177,9 @@ impl SessionStore {
             .context("Session not found")?;
 
         // Replace if quadrant already exists
-        session.quadrants.retain(|q| q.quadrant != state.quadrant || q.monitor != state.monitor);
+        session
+            .quadrants
+            .retain(|q| q.quadrant != state.quadrant || q.monitor != state.monitor);
         session.quadrants.push(state);
 
         self.save()
@@ -172,10 +211,13 @@ impl SessionStore {
         quadrants.into_iter().find(|q| q.branch == target)
     }
 
-    pub fn current_session_id(&self) -> String {
-        self.current
-            .clone()
-            .unwrap_or_else(|| "default".into())
+    pub fn current_session_id(&self) -> Option<String> {
+        self.current.clone().or_else(|| {
+            self.sessions
+                .iter()
+                .find(|session| session.status == SessionStatus::Active)
+                .map(|session| session.id.clone())
+        })
     }
 
     pub fn active_quadrants(&self) -> Vec<QuadrantState> {
@@ -212,6 +254,8 @@ impl SessionStore {
         if let Some(session) = self.sessions.iter_mut().find(|s| s.id == session_id) {
             if status == SessionStatus::Sleeping {
                 session.slept_at = Some(chrono::Utc::now().to_rfc3339());
+            } else {
+                self.current = Some(session_id.to_string());
             }
             session.status = status;
             self.save()?;
@@ -269,7 +313,11 @@ impl SessionStore {
             return 1;
         }
         let min = active.iter().map(|q| q.quadrant).min().unwrap_or(1);
-        if min > 1 { min - 1 } else { active.iter().map(|q| q.quadrant).max().unwrap_or(1) }
+        if min > 1 {
+            min - 1
+        } else {
+            active.iter().map(|q| q.quadrant).max().unwrap_or(1)
+        }
     }
 
     pub fn clean_closed(&self) -> Result<usize> {
@@ -310,7 +358,9 @@ mod tests {
     #[test]
     fn test_ensure_active_session() {
         let mut store = test_store();
-        let id = store.ensure_active_session("test-session", "/tmp/repo").unwrap();
+        let id = store
+            .ensure_active_session("test-session", "/tmp/repo")
+            .unwrap();
         assert!(!id.is_empty());
         assert_eq!(store.sessions.len(), 1);
         assert_eq!(store.sessions[0].name, "test-session");
@@ -328,7 +378,13 @@ mod tests {
         let mut store = test_store();
         let id = store.ensure_active_session("test", "/tmp").unwrap();
 
-        let q1 = new_quadrant_state(1, 0, "feat/auth", "/tmp/auth".into(), &["claude".into(), "codex".into()]);
+        let q1 = new_quadrant_state(
+            1,
+            0,
+            "feat/auth",
+            "/tmp/auth".into(),
+            &["claude".into(), "codex".into()],
+        );
         store.add_quadrant(&id, q1).unwrap();
 
         assert_eq!(store.active_quadrants().len(), 1);
@@ -413,9 +469,24 @@ mod tests {
         let mut store = test_store();
         let id = store.ensure_active_session("test", "/tmp").unwrap();
 
-        store.add_quadrant(&id, new_quadrant_state(1, 0, "b1", "/tmp/1".into(), &["c".into()])).unwrap();
-        store.add_quadrant(&id, new_quadrant_state(3, 0, "b3", "/tmp/3".into(), &["c".into()])).unwrap();
-        store.add_quadrant(&id, new_quadrant_state(5, 1, "b5", "/tmp/5".into(), &["c".into()])).unwrap();
+        store
+            .add_quadrant(
+                &id,
+                new_quadrant_state(1, 0, "b1", "/tmp/1".into(), &["c".into()]),
+            )
+            .unwrap();
+        store
+            .add_quadrant(
+                &id,
+                new_quadrant_state(3, 0, "b3", "/tmp/3".into(), &["c".into()]),
+            )
+            .unwrap();
+        store
+            .add_quadrant(
+                &id,
+                new_quadrant_state(5, 1, "b5", "/tmp/5".into(), &["c".into()]),
+            )
+            .unwrap();
 
         assert_eq!(store.occupied_quadrants(0), vec![1, 3]);
         assert_eq!(store.occupied_quadrants(1), vec![5]);
@@ -427,8 +498,18 @@ mod tests {
         let mut store = test_store();
         let id = store.ensure_active_session("test", "/tmp").unwrap();
 
-        store.add_quadrant(&id, new_quadrant_state(1, 0, "b1", "/tmp/1".into(), &["c".into()])).unwrap();
-        store.add_quadrant(&id, new_quadrant_state(3, 0, "b3", "/tmp/3".into(), &["c".into()])).unwrap();
+        store
+            .add_quadrant(
+                &id,
+                new_quadrant_state(1, 0, "b1", "/tmp/1".into(), &["c".into()]),
+            )
+            .unwrap();
+        store
+            .add_quadrant(
+                &id,
+                new_quadrant_state(3, 0, "b3", "/tmp/3".into(), &["c".into()]),
+            )
+            .unwrap();
 
         assert_eq!(store.next_quadrant(), 4); // max(1,3) + 1
         assert_eq!(store.prev_quadrant(), 3); // wraps: min is 1, so prev = max = 3... actually min > 1 is false
@@ -493,6 +574,7 @@ pub fn new_quadrant_state(
         monitor,
         branch: branch.to_string(),
         worktree_path,
+        window_id: None,
         agents: agent_map,
         pr_status: None,
     }

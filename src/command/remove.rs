@@ -22,14 +22,15 @@ pub async fn run(args: RemoveArgs) -> Result<()> {
 
     if args.circle {
         println!("Removing all worktrees in circle...");
-        let branches: Vec<String> = store.active_quadrants().iter().map(|q| q.branch.clone()).collect();
-        for branch in branches {
-            remove_one(&config, &ghostty, &mut store, &branch)?;
+        let quadrants = store.active_quadrants();
+        for quadrant in quadrants {
+            remove_one(&config, &ghostty, &mut store, &quadrant)?;
         }
     } else if let Some(target) = &args.target {
-        // Resolve target — could be quadrant number or branch name
-        let branch = resolve_target(&store, target)?;
-        remove_one(&config, &ghostty, &mut store, &branch)?;
+        let quadrant = store
+            .find_quadrant(target)
+            .ok_or_else(|| anyhow::anyhow!("No active worktree found for {}", target))?;
+        remove_one(&config, &ghostty, &mut store, &quadrant)?;
     } else {
         anyhow::bail!("Specify a branch/quadrant to remove, or use --circle");
     }
@@ -37,41 +38,32 @@ pub async fn run(args: RemoveArgs) -> Result<()> {
     Ok(())
 }
 
-fn resolve_target(store: &SessionStore, target: &str) -> Result<String> {
-    // Try as quadrant number
-    if let Ok(num) = target.parse::<u8>() {
-        if let Some(q) = store.active_quadrants().iter().find(|q| q.quadrant == num) {
-            return Ok(q.branch.clone());
-        }
-        anyhow::bail!("No active worktree in quadrant {}", num);
-    }
-    Ok(target.to_string())
-}
-
 fn remove_one(
     config: &Config,
     ghostty: &GhosttyBackend,
     store: &mut SessionStore,
-    branch: &str,
+    quadrant: &crate::session::store::QuadrantState,
 ) -> Result<()> {
     // Close Ghostty window
-    if let Err(e) = ghostty.close_window(branch) {
-        tracing::warn!("Could not close window for {}: {}", branch, e);
+    if let Some(window_id) = quadrant.window_id.as_deref() {
+        if let Err(e) = ghostty.close_window(window_id) {
+            tracing::warn!("Could not close window for {}: {}", quadrant.branch, e);
+        }
     }
 
     // Remove worktree
-    if let Err(e) = crate::git::worktree::remove(config, branch) {
-        tracing::warn!("Could not remove worktree for {}: {}", branch, e);
+    if let Err(e) = crate::git::worktree::remove(config, &quadrant.branch) {
+        tracing::warn!("Could not remove worktree for {}: {}", quadrant.branch, e);
     }
 
     // Delete branch
-    if let Err(e) = crate::git::branch::delete(branch) {
-        tracing::warn!("Could not delete branch {}: {}", branch, e);
+    if let Err(e) = crate::git::branch::delete(&quadrant.branch) {
+        tracing::warn!("Could not delete branch {}: {}", quadrant.branch, e);
     }
 
     // Remove from session store
-    store.remove_quadrant(branch)?;
+    store.remove_quadrant(&quadrant.branch)?;
 
-    println!("Removed: {}", branch);
+    println!("Removed: {}", quadrant.branch);
     Ok(())
 }

@@ -13,7 +13,10 @@ pub struct InitArgs {
 }
 
 pub async fn run(args: InitArgs) -> Result<()> {
-    let path = args.path.map(PathBuf::from).unwrap_or(std::env::current_dir()?);
+    let path = args
+        .path
+        .map(PathBuf::from)
+        .unwrap_or(std::env::current_dir()?);
     let config_path = path.join(".seance.yaml");
 
     if config_path.exists() {
@@ -87,9 +90,23 @@ group:
   - claude
   - codex
 
+agents:
+  claude:
+    command: "{}"
+    prompt_injection: trailing
+    auto_name: true
+    auto_name_command: "{}"
+  codex:
+    command: "{}"
+    prompt_injection: flag
+    auto_name: false
+
 merge_strategy: squash
 "#,
-        main_branch
+        main_branch,
+        crate::agent::claude::COMMAND,
+        crate::agent::claude::AUTO_NAME_COMMAND,
+        crate::agent::codex::COMMAND,
     );
 
     // Add project-specific hooks and file ops
