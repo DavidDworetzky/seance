@@ -31,7 +31,7 @@ pub async fn run(args: ConfigArgs) -> Result<()> {
         }
         ConfigCommand::Show => {
             let config = crate::config::schema::Config::load(None)?;
-            let yaml = serde_yaml::to_string(&config)?;
+            let yaml = serde_yml::to_string(&config)?;
             println!("{}", yaml);
         }
     }

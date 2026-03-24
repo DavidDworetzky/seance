@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 use schema::Config;
-use serde_yaml::Value;
+use serde_yml::Value;
 
 const PROJECT_CONFIG_NAME: &str = ".seance.yaml";
 const GLOBAL_CONFIG_DIR: &str = "seance";
@@ -22,15 +22,15 @@ impl Config {
 
         let global_config = global_config_path();
 
-        let mut merged = serde_yaml::to_value(Config::default())
-            .with_context(|| "serializing default config")?;
+        let mut merged =
+            serde_yml::to_value(Config::default()).with_context(|| "serializing default config")?;
 
         // Load global first (lower priority)
         if let Some(path) = &global_config {
             if path.exists() {
                 let contents = std::fs::read_to_string(path)
                     .with_context(|| format!("reading global config: {}", path.display()))?;
-                let value: Value = serde_yaml::from_str(&contents)
+                let value: Value = serde_yml::from_str(&contents)
                     .with_context(|| format!("parsing global config: {}", path.display()))?;
                 merge_values(&mut merged, value);
             }
@@ -41,13 +41,13 @@ impl Config {
             if path.exists() {
                 let contents = std::fs::read_to_string(path)
                     .with_context(|| format!("reading project config: {}", path.display()))?;
-                let value: Value = serde_yaml::from_str(&contents)
+                let value: Value = serde_yml::from_str(&contents)
                     .with_context(|| format!("parsing project config: {}", path.display()))?;
                 merge_values(&mut merged, value);
             }
         }
 
-        serde_yaml::from_value(merged).with_context(|| "building merged config")
+        serde_yml::from_value(merged).with_context(|| "building merged config")
     }
 }
 
