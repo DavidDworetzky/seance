@@ -278,8 +278,8 @@ mod tests {
     #[test]
     fn test_config_serialization_roundtrip() {
         let config = Config::default();
-        let yaml = serde_yaml::to_string(&config).unwrap();
-        let parsed: Config = serde_yaml::from_str(&yaml).unwrap();
+        let yaml = serde_yml::to_string(&config).unwrap();
+        let parsed: Config = serde_yml::from_str(&yaml).unwrap();
         assert_eq!(parsed.main_branch, config.main_branch);
         assert_eq!(parsed.group, config.group);
     }
@@ -287,7 +287,7 @@ mod tests {
     #[test]
     fn test_parse_minimal_yaml() {
         let yaml = "main_branch: develop\n";
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = serde_yml::from_str(yaml).unwrap();
         assert_eq!(config.main_branch, "develop");
         // Defaults should fill in
         assert_eq!(config.group, vec!["claude", "codex"]);
@@ -301,14 +301,14 @@ group:
   - codex
   - gemini
 "#;
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = serde_yml::from_str(yaml).unwrap();
         assert_eq!(config.group, vec!["claude", "codex", "gemini"]);
     }
 
     #[test]
     fn test_merge_strategy_serde() {
         let yaml = "merge_strategy: rebase\n";
-        let config: Config = serde_yaml::from_str(yaml).unwrap();
+        let config: Config = serde_yml::from_str(yaml).unwrap();
         assert!(matches!(config.merge_strategy, MergeStrategy::Rebase));
     }
 

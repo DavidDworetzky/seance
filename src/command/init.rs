@@ -213,7 +213,7 @@ mod tests {
     #[test]
     fn test_generate_default_config_is_parseable() {
         let yaml = generate_default_config("main", "Unknown");
-        let parsed: crate::config::schema::Config = serde_yaml::from_str(&yaml).unwrap();
+        let parsed: crate::config::schema::Config = serde_yml::from_str(&yaml).unwrap();
         let codex = parsed.agents.get("codex").unwrap();
         assert_eq!(codex.command, crate::agent::codex::COMMAND);
     }
