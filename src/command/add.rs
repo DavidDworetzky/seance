@@ -59,7 +59,9 @@ pub async fn run(args: AddArgs) -> Result<()> {
     let prompt_content =
         crate::agent::prompt::resolve_prompt(args.prompt.as_deref(), args.prompt_file.as_deref())?;
 
-    let repo_path = std::env::current_dir()?.to_string_lossy().to_string();
+    let repo_path = crate::git::repo_root(&std::env::current_dir()?)?
+        .to_string_lossy()
+        .to_string();
     let auto_name_requested = args.auto_name || config.auto_name.enabled;
     let branch_seed = match args.branch.clone() {
         Some(branch) => Some(branch),
