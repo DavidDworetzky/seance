@@ -144,7 +144,7 @@ impl SessionStore {
         // If there's a current active session, return it
         if let Some(ref current_id) = self.current {
             if let Some(session) = self.sessions.iter().find(|s| s.id == *current_id) {
-                if session.status == SessionStatus::Active {
+                if session.status == SessionStatus::Active && session.repo_path == repo_path {
                     return Ok(current_id.clone());
                 }
             }
@@ -194,6 +194,14 @@ impl SessionStore {
             }
             if let Some(pos) = session.quadrants.iter().position(|q| q.branch == branch) {
                 let removed = session.quadrants.remove(pos);
+                let session_empty = session.quadrants.is_empty();
+                let session_id = session.id.clone();
+                if session_empty {
+                    if self.current.as_deref() == Some(&session_id) {
+                        self.current = None;
+                    }
+                    self.sessions.retain(|s| s.id != session_id);
+                }
                 self.save()?;
                 return Ok(Some(removed));
             }
@@ -375,6 +383,23 @@ mod tests {
     }
 
     #[test]
+    fn test_ensure_active_session_different_repo() {
+        let mut store = test_store();
+        let id1 = store
+            .ensure_active_session("session-a", "/tmp/repo-a")
+            .unwrap();
+        assert_eq!(store.sessions.len(), 1);
+
+        // Different repo_path should create a new session
+        let id2 = store
+            .ensure_active_session("session-b", "/tmp/repo-b")
+            .unwrap();
+        assert_ne!(id1, id2);
+        assert_eq!(store.sessions.len(), 2);
+        assert_eq!(store.current, Some(id2));
+    }
+
+    #[test]
     fn test_add_and_remove_quadrant() {
         let mut store = test_store();
         let id = store.ensure_active_session("test", "/tmp").unwrap();
@@ -402,6 +427,22 @@ mod tests {
         assert!(removed.is_some());
         assert_eq!(store.active_quadrants().len(), 1);
         assert_eq!(store.active_quadrants()[0].branch, "feat/api");
+    }
+
+    #[test]
+    fn test_remove_last_quadrant_closes_session() {
+        let mut store = test_store();
+        let id = store.ensure_active_session("test", "/tmp").unwrap();
+
+        let q = new_quadrant_state(1, 0, "feat/only", "/tmp/only".into(), &["claude".into()]);
+        store.add_quadrant(&id, q).unwrap();
+        assert_eq!(store.current, Some(id.clone()));
+
+        // Removing the last quadrant should remove the session and clear current
+        store.remove_quadrant("feat/only").unwrap();
+        assert_eq!(store.active_quadrants().len(), 0);
+        assert_eq!(store.current, None);
+        assert!(store.sessions.is_empty());
     }
 
     #[test]
