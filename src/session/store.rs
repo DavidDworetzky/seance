@@ -139,15 +139,48 @@ impl SessionStore {
         Ok(())
     }
 
+    fn normalize_repo_path(repo_path: &str) -> String {
+        crate::git::repo_root(std::path::Path::new(repo_path))
+            .unwrap_or_else(|_| std::path::PathBuf::from(repo_path))
+            .to_string_lossy()
+            .to_string()
+    }
+
     /// Get or create the current active session, returning its id.
     pub fn ensure_active_session(&mut self, name: &str, repo_path: &str) -> Result<String> {
+        let normalized_repo_path = Self::normalize_repo_path(repo_path);
+
         // If there's a current active session, return it
         if let Some(ref current_id) = self.current {
             if let Some(session) = self.sessions.iter().find(|s| s.id == *current_id) {
-                if session.status == SessionStatus::Active && session.repo_path == repo_path {
+                if session.status == SessionStatus::Active
+                    && Self::normalize_repo_path(&session.repo_path) == normalized_repo_path
+                {
                     return Ok(current_id.clone());
                 }
             }
+        }
+
+        if let Some(index) = self.sessions.iter().position(|session| {
+            session.status == SessionStatus::Active
+                && Self::normalize_repo_path(&session.repo_path) == normalized_repo_path
+        }) {
+            let session_id = self.sessions[index].id.clone();
+            let mut changed = false;
+
+            if self.sessions[index].repo_path != normalized_repo_path {
+                self.sessions[index].repo_path = normalized_repo_path.clone();
+                changed = true;
+            }
+            if self.current.as_deref() != Some(&session_id) {
+                self.current = Some(session_id.clone());
+                changed = true;
+            }
+            if changed {
+                self.save()?;
+            }
+
+            return Ok(session_id);
         }
 
         // Create a new session
@@ -156,7 +189,7 @@ impl SessionStore {
             id: id.clone(),
             name: name.to_string(),
             status: SessionStatus::Active,
-            repo_path: repo_path.to_string(),
+            repo_path: normalized_repo_path,
             created_at: chrono::Utc::now().to_rfc3339(),
             slept_at: None,
             quadrants: vec![],
@@ -351,9 +384,19 @@ impl SessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn test_store() -> SessionStore {
         SessionStore::empty()
+    }
+
+    fn init_git_repo(path: &Path) {
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(path)
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
 
     #[test]
@@ -397,6 +440,53 @@ mod tests {
         assert_ne!(id1, id2);
         assert_eq!(store.sessions.len(), 2);
         assert_eq!(store.current, Some(id2));
+    }
+
+    #[test]
+    fn test_ensure_active_session_reuses_existing_repo_after_switching() {
+        let repo_a = tempfile::tempdir().unwrap();
+        let repo_b = tempfile::tempdir().unwrap();
+        init_git_repo(repo_a.path());
+        init_git_repo(repo_b.path());
+
+        let mut store = test_store();
+        let id1 = store
+            .ensure_active_session("session-a", repo_a.path().to_str().unwrap())
+            .unwrap();
+        let id2 = store
+            .ensure_active_session("session-b", repo_b.path().to_str().unwrap())
+            .unwrap();
+        let id3 = store
+            .ensure_active_session("session-a-again", repo_a.path().to_str().unwrap())
+            .unwrap();
+
+        assert_ne!(id1, id2);
+        assert_eq!(id1, id3);
+        assert_eq!(store.sessions.len(), 2);
+        assert_eq!(store.current, Some(id1));
+    }
+
+    #[test]
+    fn test_ensure_active_session_normalizes_repo_subdir_to_same_session() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        let subdir = repo.path().join("src/nested");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        let mut store = test_store();
+        let id1 = store
+            .ensure_active_session("session-root", repo.path().to_str().unwrap())
+            .unwrap();
+        let id2 = store
+            .ensure_active_session("session-subdir", subdir.to_str().unwrap())
+            .unwrap();
+
+        assert_eq!(id1, id2);
+        assert_eq!(store.sessions.len(), 1);
+        assert_eq!(
+            store.sessions[0].repo_path,
+            repo.path().canonicalize().unwrap().to_string_lossy()
+        );
     }
 
     #[test]
