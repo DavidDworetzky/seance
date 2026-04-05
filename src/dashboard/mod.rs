@@ -14,27 +14,23 @@ use std::io::stdout;
 use app::App;
 
 pub async fn run_in_ghostty() -> Result<()> {
-    let backend = crate::ghostty::GhosttyBackend::new();
+    let exe = std::env::current_exe()?;
     let cwd = std::env::current_dir()?;
-    let bounds = crate::layout::quadrant::WindowBounds {
-        x: 100,
-        y: 100,
-        width: 1200,
-        height: 800,
-    };
 
-    match backend.create_window(&cwd, &bounds) {
-        Ok(window) => {
-            let exe = std::env::current_exe()?
-                .to_string_lossy()
-                .to_string();
-            backend.send_text(
-                &window.terminal_id,
-                &format!("{} dashboard --inline\n", exe),
-            )?;
-            Ok(())
-        }
-        Err(_) => {
+    let result = std::process::Command::new("open")
+        .args([
+            "-na",
+            "Ghostty.app",
+            "--args",
+            "-e",
+            &format!("{} dashboard --inline", exe.display()),
+            &format!("--working-directory={}", cwd.display()),
+        ])
+        .status();
+
+    match result {
+        Ok(status) if status.success() => Ok(()),
+        _ => {
             // Ghostty not available, fall back to inline TUI
             run().await
         }
