@@ -17,13 +17,13 @@ pub async fn run_in_ghostty() -> Result<()> {
     let exe = std::env::current_exe()?;
     let cwd = std::env::current_dir()?;
 
+    let command = format!("{} dashboard --inline", exe.display());
     let result = std::process::Command::new("open")
         .args([
             "-na",
             "Ghostty.app",
             "--args",
-            "-e",
-            &format!("{} dashboard --inline", exe.display()),
+            &format!("--command={}", command),
             &format!("--working-directory={}", cwd.display()),
         ])
         .status();
