@@ -44,6 +44,19 @@ fn remove_one(
     store: &mut SessionStore,
     quadrant: &crate::session::store::QuadrantState,
 ) -> Result<()> {
+    delete_quadrant(config, ghostty, store, quadrant)?;
+    println!("Removed: {}", quadrant.branch);
+    Ok(())
+}
+
+/// Delete a quadrant: close its window, remove worktree, delete branch, and update session store.
+/// Shared between the CLI `remove` command and the TUI dashboard.
+pub fn delete_quadrant(
+    config: &Config,
+    ghostty: &GhosttyBackend,
+    store: &mut SessionStore,
+    quadrant: &crate::session::store::QuadrantState,
+) -> Result<()> {
     // Close Ghostty window
     let close_result = match quadrant.window_id.as_deref() {
         Some(window_id) => ghostty.close_window(window_id),
@@ -66,6 +79,5 @@ fn remove_one(
     // Remove from session store
     store.remove_quadrant(&quadrant.branch)?;
 
-    println!("Removed: {}", quadrant.branch);
     Ok(())
 }

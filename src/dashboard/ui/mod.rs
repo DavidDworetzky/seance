@@ -175,7 +175,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
     let help = if app.input_mode {
         "Esc: exit input | type to send to spirit"
     } else {
-        "j/k: navigate  Enter: jump  Tab: toggle agent  i: input  m: merge  d: diff  q: quit  ?: help"
+        "j/k: navigate  Enter: jump  Tab: toggle agent  i: input  x/Del: delete  m: merge  d: diff  q: quit"
     };
 
     let bar = Paragraph::new(help).style(Style::default().fg(Color::DarkGray));
