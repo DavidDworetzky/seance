@@ -139,15 +139,48 @@ impl SessionStore {
         Ok(())
     }
 
+    fn normalize_repo_path(repo_path: &str) -> String {
+        crate::git::repo_root(std::path::Path::new(repo_path))
+            .unwrap_or_else(|_| std::path::PathBuf::from(repo_path))
+            .to_string_lossy()
+            .to_string()
+    }
+
     /// Get or create the current active session, returning its id.
     pub fn ensure_active_session(&mut self, name: &str, repo_path: &str) -> Result<String> {
+        let normalized_repo_path = Self::normalize_repo_path(repo_path);
+
         // If there's a current active session, return it
         if let Some(ref current_id) = self.current {
             if let Some(session) = self.sessions.iter().find(|s| s.id == *current_id) {
-                if session.status == SessionStatus::Active {
+                if session.status == SessionStatus::Active
+                    && Self::normalize_repo_path(&session.repo_path) == normalized_repo_path
+                {
                     return Ok(current_id.clone());
                 }
             }
+        }
+
+        if let Some(index) = self.sessions.iter().position(|session| {
+            session.status == SessionStatus::Active
+                && Self::normalize_repo_path(&session.repo_path) == normalized_repo_path
+        }) {
+            let session_id = self.sessions[index].id.clone();
+            let mut changed = false;
+
+            if self.sessions[index].repo_path != normalized_repo_path {
+                self.sessions[index].repo_path = normalized_repo_path.clone();
+                changed = true;
+            }
+            if self.current.as_deref() != Some(&session_id) {
+                self.current = Some(session_id.clone());
+                changed = true;
+            }
+            if changed {
+                self.save()?;
+            }
+
+            return Ok(session_id);
         }
 
         // Create a new session
@@ -156,7 +189,7 @@ impl SessionStore {
             id: id.clone(),
             name: name.to_string(),
             status: SessionStatus::Active,
-            repo_path: repo_path.to_string(),
+            repo_path: normalized_repo_path,
             created_at: chrono::Utc::now().to_rfc3339(),
             slept_at: None,
             quadrants: vec![],
@@ -194,6 +227,14 @@ impl SessionStore {
             }
             if let Some(pos) = session.quadrants.iter().position(|q| q.branch == branch) {
                 let removed = session.quadrants.remove(pos);
+                let session_empty = session.quadrants.is_empty();
+                let session_id = session.id.clone();
+                if session_empty {
+                    if self.current.as_deref() == Some(&session_id) {
+                        self.current = None;
+                    }
+                    self.sessions.retain(|s| s.id != session_id);
+                }
                 self.save()?;
                 return Ok(Some(removed));
             }
@@ -343,9 +384,19 @@ impl SessionStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     fn test_store() -> SessionStore {
         SessionStore::empty()
+    }
+
+    fn init_git_repo(path: &Path) {
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(path)
+            .status()
+            .unwrap();
+        assert!(status.success());
     }
 
     #[test]
@@ -372,6 +423,70 @@ mod tests {
         let id2 = store.ensure_active_session("another", "/tmp/repo").unwrap();
         assert_eq!(id, id2);
         assert_eq!(store.sessions.len(), 1);
+    }
+
+    #[test]
+    fn test_ensure_active_session_different_repo() {
+        let mut store = test_store();
+        let id1 = store
+            .ensure_active_session("session-a", "/tmp/repo-a")
+            .unwrap();
+        assert_eq!(store.sessions.len(), 1);
+
+        // Different repo_path should create a new session
+        let id2 = store
+            .ensure_active_session("session-b", "/tmp/repo-b")
+            .unwrap();
+        assert_ne!(id1, id2);
+        assert_eq!(store.sessions.len(), 2);
+        assert_eq!(store.current, Some(id2));
+    }
+
+    #[test]
+    fn test_ensure_active_session_reuses_existing_repo_after_switching() {
+        let repo_a = tempfile::tempdir().unwrap();
+        let repo_b = tempfile::tempdir().unwrap();
+        init_git_repo(repo_a.path());
+        init_git_repo(repo_b.path());
+
+        let mut store = test_store();
+        let id1 = store
+            .ensure_active_session("session-a", repo_a.path().to_str().unwrap())
+            .unwrap();
+        let id2 = store
+            .ensure_active_session("session-b", repo_b.path().to_str().unwrap())
+            .unwrap();
+        let id3 = store
+            .ensure_active_session("session-a-again", repo_a.path().to_str().unwrap())
+            .unwrap();
+
+        assert_ne!(id1, id2);
+        assert_eq!(id1, id3);
+        assert_eq!(store.sessions.len(), 2);
+        assert_eq!(store.current, Some(id1));
+    }
+
+    #[test]
+    fn test_ensure_active_session_normalizes_repo_subdir_to_same_session() {
+        let repo = tempfile::tempdir().unwrap();
+        init_git_repo(repo.path());
+        let subdir = repo.path().join("src/nested");
+        std::fs::create_dir_all(&subdir).unwrap();
+
+        let mut store = test_store();
+        let id1 = store
+            .ensure_active_session("session-root", repo.path().to_str().unwrap())
+            .unwrap();
+        let id2 = store
+            .ensure_active_session("session-subdir", subdir.to_str().unwrap())
+            .unwrap();
+
+        assert_eq!(id1, id2);
+        assert_eq!(store.sessions.len(), 1);
+        assert_eq!(
+            store.sessions[0].repo_path,
+            repo.path().canonicalize().unwrap().to_string_lossy()
+        );
     }
 
     #[test]
@@ -402,6 +517,22 @@ mod tests {
         assert!(removed.is_some());
         assert_eq!(store.active_quadrants().len(), 1);
         assert_eq!(store.active_quadrants()[0].branch, "feat/api");
+    }
+
+    #[test]
+    fn test_remove_last_quadrant_closes_session() {
+        let mut store = test_store();
+        let id = store.ensure_active_session("test", "/tmp").unwrap();
+
+        let q = new_quadrant_state(1, 0, "feat/only", "/tmp/only".into(), &["claude".into()]);
+        store.add_quadrant(&id, q).unwrap();
+        assert_eq!(store.current, Some(id.clone()));
+
+        // Removing the last quadrant should remove the session and clear current
+        store.remove_quadrant("feat/only").unwrap();
+        assert_eq!(store.active_quadrants().len(), 0);
+        assert_eq!(store.current, None);
+        assert!(store.sessions.is_empty());
     }
 
     #[test]
