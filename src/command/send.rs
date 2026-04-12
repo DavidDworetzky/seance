@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Args;
 
-use crate::ghostty::GhosttyBackend;
+use crate::ghostty::{GhosttyBackend, TerminalId, TerminalInput, WindowTitle};
 use crate::session::store::SessionStore;
 
 #[derive(Args)]
@@ -56,9 +56,13 @@ pub async fn run(args: SendArgs) -> Result<()> {
 
     for agent_name in &agents_to_send {
         if let Some(pane_id) = quadrant.pane_id(agent_name) {
-            ghostty.send_text(pane_id, &text)?;
+            let pane_id = TerminalId::new(pane_id.to_string())?;
+            let text = TerminalInput::new(text.clone());
+            ghostty.send_text(&pane_id, &text)?;
         } else {
-            ghostty.send_text_to_window(&quadrant.window_title(agent_name), &text)?;
+            let window_title = WindowTitle::new(quadrant.window_title(agent_name))?;
+            let text = TerminalInput::new(text.clone());
+            ghostty.send_text_to_window(&window_title, &text)?;
         }
         println!("Sent to Q{}:{}", quadrant_num, agent_name);
     }

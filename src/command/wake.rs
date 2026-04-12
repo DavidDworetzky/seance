@@ -3,7 +3,7 @@ use clap::Args;
 
 use crate::agent;
 use crate::config::schema::Config;
-use crate::ghostty::GhosttyBackend;
+use crate::ghostty::{GhosttyBackend, TerminalInput};
 use crate::session::store::{SessionStatus, SessionStore};
 
 #[derive(Args)]
@@ -57,32 +57,40 @@ pub async fn run(args: WakeArgs) -> Result<()> {
         }
 
         let bounds = crate::layout::quadrant::compute_bounds(q.quadrant, q.monitor, &config);
-        let window = ghostty.create_window(&q.worktree_path, &bounds)?;
+        let agents = q.ordered_agent_names(&config.group);
+        let first_input = agents
+            .first()
+            .and_then(|agent_name| config.agents.get(agent_name))
+            .map(|ac| TerminalInput::new(format!("{}\n", agent::build_launch_command(ac, None))));
+        let window =
+            ghostty.create_window_with_input(&q.worktree_path, &bounds, first_input.as_ref())?;
 
         // Re-split for each agent in the group
-        let agents = q.ordered_agent_names(&config.group);
+        let window_id = window.window_id.clone();
         let mut current_terminal = window.terminal_id.clone();
         let mut restored = q.clone();
-        restored.window_id = Some(window.window_id);
+        restored.window_id = Some(window.window_id.to_string());
 
         for (i, agent_name) in agents.iter().enumerate() {
+            let launch_input = config.agents.get(agent_name).map(|ac| {
+                TerminalInput::new(format!("{}\n", agent::build_launch_command(ac, None)))
+            });
             if i > 0 {
-                current_terminal = ghostty.split_right(&current_terminal)?;
+                current_terminal =
+                    ghostty.split_right_with_input(&window_id, launch_input.as_ref())?;
             }
             if let Some(spirit) = restored.agents.get_mut(agent_name) {
-                spirit.pane_id = Some(current_terminal.clone());
-            }
-            if let Some(ac) = config.agents.get(agent_name) {
-                let cmd = agent::build_launch_command(ac, None);
-                ghostty.send_text(&current_terminal, &format!("{}\n", cmd))?;
+                spirit.pane_id = Some(current_terminal.to_string());
             }
             println!("  Restored {} in Q{}", agent_name, q.quadrant);
         }
 
-        if let Some(last_agent) = agents.last() {
-            if let Some(shell_target) = restored.pane_id(last_agent) {
-                let _ = ghostty.split_down(shell_target)?;
-            }
+        if agents
+            .last()
+            .and_then(|last_agent| restored.pane_id(last_agent))
+            .is_some()
+        {
+            let _ = ghostty.split_down(&window_id)?;
         }
 
         store.add_quadrant(&session_id, restored)?;

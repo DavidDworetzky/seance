@@ -3,6 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent};
 
 use crate::command::detect::DetectedRepo;
 use crate::config::schema::Config;
+use crate::ghostty::{TerminalId, TerminalInput, WindowId, WindowTitle};
 use crate::session::store::{QuadrantState, SessionStore};
 
 pub struct App {
@@ -65,10 +66,17 @@ impl App {
                         if let Some(agent_name) = agents.get(self.preview_agent) {
                             let ghostty = crate::ghostty::GhosttyBackend::new();
                             let _ = match q.pane_id(agent_name) {
-                                Some(pane_id) => ghostty.send_text(pane_id, &c.to_string()),
-                                None => ghostty.send_text_to_window(
-                                    &q.window_title(agent_name),
-                                    &c.to_string(),
+                                Some(pane_id) => {
+                                    TerminalId::new(pane_id.to_string()).and_then(|pane_id| {
+                                        let text = TerminalInput::new(c.to_string());
+                                        ghostty.send_text(&pane_id, &text)
+                                    })
+                                }
+                                None => WindowTitle::new(q.window_title(agent_name)).and_then(
+                                    |window_title| {
+                                        let text = TerminalInput::new(c.to_string());
+                                        ghostty.send_text_to_window(&window_title, &text)
+                                    },
                                 ),
                             };
                         }
@@ -80,10 +88,18 @@ impl App {
                         if let Some(agent_name) = agents.get(self.preview_agent) {
                             let ghostty = crate::ghostty::GhosttyBackend::new();
                             let _ = match q.pane_id(agent_name) {
-                                Some(pane_id) => ghostty.send_text(pane_id, "\n"),
-                                None => {
-                                    ghostty.send_text_to_window(&q.window_title(agent_name), "\n")
+                                Some(pane_id) => {
+                                    TerminalId::new(pane_id.to_string()).and_then(|pane_id| {
+                                        let text = TerminalInput::new("\n");
+                                        ghostty.send_text(&pane_id, &text)
+                                    })
                                 }
+                                None => WindowTitle::new(q.window_title(agent_name)).and_then(
+                                    |window_title| {
+                                        let text = TerminalInput::new("\n");
+                                        ghostty.send_text_to_window(&window_title, &text)
+                                    },
+                                ),
                             };
                         }
                     }
@@ -125,8 +141,10 @@ impl App {
                 if let Some(q) = self.quadrants.get(self.selected) {
                     let ghostty = crate::ghostty::GhosttyBackend::new();
                     let _ = match q.window_id.as_deref() {
-                        Some(window_id) => ghostty.focus_window(window_id),
-                        None => ghostty.focus_window_title(&q.main_window_title()),
+                        Some(window_id) => WindowId::new(window_id.to_string())
+                            .and_then(|window_id| ghostty.focus_window(&window_id)),
+                        None => WindowTitle::new(q.main_window_title())
+                            .and_then(|window_title| ghostty.focus_window_title(&window_title)),
                     };
                 }
             }
@@ -311,9 +329,11 @@ impl App {
             if let Some(agent_name) = agents.get(self.preview_agent) {
                 let ghostty = crate::ghostty::GhosttyBackend::new();
                 self.preview_content = match q.pane_id(agent_name) {
-                    Some(pane_id) => ghostty.capture_pane(pane_id).unwrap_or_default(),
-                    None => ghostty
-                        .capture_pane_title(&q.window_title(agent_name))
+                    Some(pane_id) => TerminalId::new(pane_id.to_string())
+                        .and_then(|pane_id| ghostty.capture_pane(&pane_id))
+                        .unwrap_or_default(),
+                    None => WindowTitle::new(q.window_title(agent_name))
+                        .and_then(|window_title| ghostty.capture_pane_title(&window_title))
                         .unwrap_or_default(),
                 };
                 return;

@@ -1,10 +1,10 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Args;
 use std::path::Path;
 
 use crate::agent;
 use crate::config::schema::Config;
-use crate::ghostty::GhosttyBackend;
+use crate::ghostty::{GhosttyBackend, TerminalInput};
 use crate::git::worktree;
 use crate::layout::quadrant::QuadrantAssigner;
 use crate::session::store::{self, SessionStore};
@@ -92,6 +92,16 @@ pub fn run_in_repo(args: AddArgs, repo_path: &Path) -> Result<Vec<CreatedQuadran
     let session_id = store.ensure_active_session(session_name, &repo_path)?;
     let mut created = Vec::new();
     let repo_path = Path::new(&repo_path);
+    crate::debug::log(
+        "add",
+        &format!(
+            "run_in_repo repo={} session_id={} circle={} monitor={}",
+            repo_path.display(),
+            session_id,
+            args.circle,
+            args.monitor
+        ),
+    );
 
     if args.circle {
         let count = config.quadrants_per_monitor;
@@ -187,19 +197,36 @@ fn create_quadrant(
         .as_deref()
         .or(config.base_branch.as_deref())
         .unwrap_or(&config.main_branch);
+    let target = format!(
+        "repo={} branch={} quadrant={} monitor={}",
+        repo_path.display(),
+        branch,
+        quadrant,
+        monitor
+    );
+    crate::debug::log("add", &format!("start {}", target));
 
     // 1. Create worktree
-    let wt_path = worktree::create_in_repo(config, repo_path, branch, base)?;
+    let wt_path = worktree::create_in_repo(config, repo_path, branch, base)
+        .with_context(|| format!("add flow step=create_worktree {}", target))?;
+    crate::debug::log(
+        "add",
+        &format!("created worktree {} {}", wt_path.display(), target),
+    );
     println!("  Created worktree: {}", wt_path.display());
 
     // 2. File operations
     if !args.no_file_ops {
-        crate::files::ops::run_file_ops(config, &wt_path)?;
+        crate::files::ops::run_file_ops(config, &wt_path)
+            .with_context(|| format!("add flow step=file_ops {}", target))?;
+        crate::debug::log("add", &format!("file ops complete {}", target));
     }
 
     // 3. Post-create hooks
     for hook in &config.post_create {
-        crate::files::ops::run_hook(hook, &wt_path)?;
+        crate::files::ops::run_hook(hook, &wt_path)
+            .with_context(|| format!("add flow step=post_create hook={} {}", hook, target))?;
+        crate::debug::log("add", &format!("post-create hook={} {}", hook, target));
     }
 
     // 4. Determine agents for this quadrant
@@ -212,22 +239,82 @@ fn create_quadrant(
     // 5. Resolve prompt if provided
     let prompt_file = prompt_content
         .map(|content| crate::agent::prompt::write_prompt_file(&wt_path, branch, content))
-        .transpose()?;
+        .transpose()
+        .with_context(|| format!("add flow step=write_prompt {}", target))?;
+    crate::debug::log(
+        "add",
+        &format!(
+            "prompt prepared prompt_file={:?} {}",
+            prompt_file.as_deref(),
+            target
+        ),
+    );
 
     // 6. Open Ghostty window in quadrant
     let bounds = crate::layout::quadrant::compute_bounds(quadrant, monitor, config);
-    let window = ghostty.create_window(&wt_path, &bounds)?;
+    crate::debug::log(
+        "add",
+        &format!(
+            "create_window bounds={{x:{}, y:{}, width:{}, height:{}}} {}",
+            bounds.x, bounds.y, bounds.width, bounds.height, target
+        ),
+    );
+    let first_input = agents
+        .first()
+        .and_then(|agent_name| config.agents.get(agent_name))
+        .map(|ac| {
+            TerminalInput::new(format!(
+                "{}\n",
+                agent::build_launch_command(ac, prompt_file.as_deref())
+            ))
+        });
+
+    let window = ghostty
+        .create_window_with_input(&wt_path, &bounds, first_input.as_ref())
+        .with_context(|| format!("add flow step=create_window {}", target))?;
+    let window_id = window.window_id.clone();
+    crate::debug::log(
+        "add",
+        &format!(
+            "window ready window_id={} terminal_id={} {}",
+            window.window_id, window.terminal_id, target
+        ),
+    );
 
     // 7. Split panes for each agent + launch
     let mut current_terminal = window.terminal_id.clone();
     let mut pane_ids = Vec::with_capacity(agents.len());
     for (i, agent_name) in agents.iter().enumerate() {
+        let launch_input = config.agents.get(agent_name).map(|ac| {
+            TerminalInput::new(format!(
+                "{}\n",
+                agent::build_launch_command(ac, prompt_file.as_deref())
+            ))
+        });
+
         if i > 0 {
-            current_terminal = ghostty.split_right(&current_terminal)?;
+            current_terminal = ghostty
+                .split_right_with_input(&window_id, launch_input.as_ref())
+                .with_context(|| {
+                    format!("add flow step=split_right agent={} {}", agent_name, target)
+                })?;
+            crate::debug::log(
+                "add",
+                &format!(
+                    "split_right agent={} terminal={} {}",
+                    agent_name, current_terminal, target
+                ),
+            );
         }
         if let Some(ac) = config.agents.get(agent_name) {
             let cmd = agent::build_launch_command(ac, prompt_file.as_deref());
-            ghostty.send_text(&current_terminal, &format!("{}\n", cmd))?;
+            crate::debug::log(
+                "add",
+                &format!(
+                    "launch_agent agent={} terminal={} command={:?} {}",
+                    agent_name, current_terminal, cmd, target
+                ),
+            );
         }
         pane_ids.push((agent_name.clone(), current_terminal.clone()));
         println!("  Started {} in Q{}", agent_name, quadrant);
@@ -235,18 +322,30 @@ fn create_quadrant(
 
     // 8. Shell pane at the bottom
     if let Some((_, terminal_id)) = pane_ids.last() {
-        let _ = ghostty.split_down(terminal_id)?;
+        let _ = ghostty.split_down(&window_id).with_context(|| {
+            format!(
+                "add flow step=split_down terminal={} {}",
+                terminal_id, target
+            )
+        })?;
+        crate::debug::log(
+            "add",
+            &format!("split_down terminal={} {}", terminal_id, target),
+        );
     }
 
     // 9. Register in session store
     let mut quadrant_state = store::new_quadrant_state(quadrant, monitor, branch, wt_path, &agents);
-    quadrant_state.window_id = Some(window.window_id);
+    quadrant_state.window_id = Some(window.window_id.to_string());
     for (agent_name, pane_id) in pane_ids {
         if let Some(spirit) = quadrant_state.agents.get_mut(&agent_name) {
-            spirit.pane_id = Some(pane_id);
+            spirit.pane_id = Some(pane_id.to_string());
         }
     }
-    store.add_quadrant(session_id, quadrant_state)?;
+    store
+        .add_quadrant(session_id, quadrant_state)
+        .with_context(|| format!("add flow step=store_quadrant {}", target))?;
+    crate::debug::log("add", &format!("stored quadrant {}", target));
 
     println!("  Q{} ready on monitor {}", quadrant, monitor);
     Ok(CreatedQuadrant {

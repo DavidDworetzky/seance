@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Args;
 
 use crate::config::schema::Config;
-use crate::ghostty::GhosttyBackend;
+use crate::ghostty::{GhosttyBackend, WindowId, WindowTitle};
 use crate::session::store::SessionStore;
 
 #[derive(Args)]
@@ -59,8 +59,14 @@ pub fn delete_quadrant(
 ) -> Result<()> {
     // Close Ghostty window
     let close_result = match quadrant.window_id.as_deref() {
-        Some(window_id) => ghostty.close_window(window_id),
-        None => ghostty.close_window_title(&quadrant.main_window_title()),
+        Some(window_id) => {
+            let window_id = WindowId::new(window_id.to_string())?;
+            ghostty.close_window(&window_id)
+        }
+        None => {
+            let window_title = WindowTitle::new(quadrant.main_window_title())?;
+            ghostty.close_window_title(&window_title)
+        }
     };
     if let Err(e) = close_result {
         tracing::warn!("Could not close window for {}: {}", quadrant.branch, e);

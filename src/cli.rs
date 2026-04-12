@@ -10,6 +10,10 @@ use crate::command;
     version
 )]
 pub struct Cli {
+    /// Enable verbose Ghostty/AppleScript diagnostics
+    #[arg(long, global = true)]
+    pub debug_ghostty: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
 }
@@ -75,6 +79,23 @@ pub enum Command {
 }
 
 pub async fn run(cli: Cli) -> Result<()> {
+    let config_debug = crate::config::schema::Config::load(None)
+        .map(|config| config.dev.diagnostic_mode)
+        .unwrap_or(false);
+    crate::debug::set_debug_ghostty(cli.debug_ghostty || config_debug);
+    if crate::debug::debug_ghostty() {
+        if let Ok(path) = crate::debug::diagnostic_log_path() {
+            crate::debug::log(
+                "cli",
+                &format!(
+                    "startup command={:?} diagnostic_log={}",
+                    cli.command.as_ref().map(command_name),
+                    path.display()
+                ),
+            );
+        }
+    }
+
     match cli.command {
         None => {
             // Default: launch TUI dashboard
@@ -101,5 +122,29 @@ pub async fn run(cli: Cli) -> Result<()> {
             Command::Dashboard(args) => crate::dashboard::run_entry(args).await,
             Command::Config(args) => command::config::run(args).await,
         },
+    }
+}
+
+fn command_name(command: &Command) -> &'static str {
+    match command {
+        Command::Add(_) => "add",
+        Command::Remove(_) => "remove",
+        Command::Merge(_) => "merge",
+        Command::Close(_) => "close",
+        Command::Sleep(_) => "sleep",
+        Command::Wake(_) => "wake",
+        Command::Send(_) => "send",
+        Command::List(_) => "list",
+        Command::Status(_) => "status",
+        Command::Capture(_) => "capture",
+        Command::Wait(_) => "wait",
+        Command::Focus(_) => "focus",
+        Command::Checkout(_) => "checkout",
+        Command::Detect(_) => "detect",
+        Command::Repo(_) => "repo",
+        Command::Init(_) => "init",
+        Command::Clean(_) => "clean",
+        Command::Dashboard(_) => "dashboard",
+        Command::Config(_) => "config",
     }
 }

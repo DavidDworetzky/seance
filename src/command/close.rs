@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Args;
 
 use crate::config::schema::MergeStrategy;
+use crate::ghostty::{WindowId, WindowTitle};
 
 #[derive(Args)]
 pub struct CloseArgs {
@@ -66,8 +67,14 @@ pub async fn run(args: CloseArgs) -> Result<()> {
         // 5. Close Ghostty window
         let close_result = match quadrant.as_ref() {
             Some(q) => match q.window_id.as_deref() {
-                Some(window_id) => ghostty.close_window(window_id),
-                None => ghostty.close_window_title(&q.main_window_title()),
+                Some(window_id) => {
+                    let window_id = WindowId::new(window_id.to_string())?;
+                    ghostty.close_window(&window_id)
+                }
+                None => {
+                    let window_title = WindowTitle::new(q.main_window_title())?;
+                    ghostty.close_window_title(&window_title)
+                }
             },
             None => Ok(()),
         };

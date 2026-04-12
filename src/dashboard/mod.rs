@@ -51,7 +51,12 @@ pub async fn run_in_ghostty() -> Result<()> {
     let exe = std::env::current_exe()?;
     let cwd = std::env::current_dir()?;
 
-    let command = format!("{} dashboard --inline", exe.display());
+    let debug_flag = if crate::debug::debug_ghostty() {
+        " --debug-ghostty"
+    } else {
+        ""
+    };
+    let command = format!("{}{} dashboard --inline", exe.display(), debug_flag);
     let result = std::process::Command::new("open")
         .args([
             "-na",

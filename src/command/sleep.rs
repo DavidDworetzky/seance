@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Args;
 
-use crate::ghostty::GhosttyBackend;
+use crate::ghostty::{GhosttyBackend, TerminalId, WindowId, WindowTitle};
 use crate::session::store::{SessionStatus, SessionStore};
 
 #[derive(Args)]
@@ -37,9 +37,11 @@ pub async fn run(args: SleepArgs) -> Result<()> {
         agent_names.sort();
         for agent_name in agent_names {
             let capture = if let Some(pane_id) = q.pane_id(&agent_name) {
-                ghostty.capture_pane(pane_id)
+                let pane_id = TerminalId::new(pane_id.to_string())?;
+                ghostty.capture_pane(&pane_id)
             } else {
-                ghostty.capture_pane_title(&q.window_title(&agent_name))
+                let window_title = WindowTitle::new(q.window_title(&agent_name))?;
+                ghostty.capture_pane_title(&window_title)
             };
 
             match capture {
@@ -61,8 +63,14 @@ pub async fn run(args: SleepArgs) -> Result<()> {
     if !args.keep_windows {
         for q in &quadrants {
             let close_result = match q.window_id.as_deref() {
-                Some(window_id) => ghostty.close_window(window_id),
-                None => ghostty.close_window_title(&q.main_window_title()),
+                Some(window_id) => {
+                    let window_id = WindowId::new(window_id.to_string())?;
+                    ghostty.close_window(&window_id)
+                }
+                None => {
+                    let window_title = WindowTitle::new(q.main_window_title())?;
+                    ghostty.close_window_title(&window_title)
+                }
             };
 
             if let Err(e) = close_result {
