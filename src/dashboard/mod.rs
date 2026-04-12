@@ -3,6 +3,7 @@ pub mod keymap;
 pub mod ui;
 
 use anyhow::Result;
+use clap::Args;
 use crossterm::{
     ExecutableCommand,
     event::{self, Event, KeyCode, KeyModifiers},
@@ -12,6 +13,39 @@ use ratatui::prelude::*;
 use std::io::stdout;
 
 use app::App;
+use crate::config::schema::Config;
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct DashboardArgs {
+    /// Launch the dashboard in a new Ghostty window
+    #[arg(long)]
+    pub ghostty: bool,
+
+    /// Run the TUI inline in the current terminal (used internally)
+    #[arg(long, hide = true)]
+    pub inline: bool,
+
+    /// Run in the current terminal even if Ghostty launch is enabled
+    #[arg(long, hide = true)]
+    pub no_ghostty: bool,
+}
+
+pub async fn run_entry(args: DashboardArgs) -> Result<()> {
+    if args.inline {
+        return run().await;
+    }
+
+    let config = Config::load(None)?;
+    if should_launch_in_ghostty(&config, &args) {
+        return run_in_ghostty().await;
+    }
+
+    run().await
+}
+
+pub async fn run_default() -> Result<()> {
+    run_entry(DashboardArgs::default()).await
+}
 
 pub async fn run_in_ghostty() -> Result<()> {
     let exe = std::env::current_exe()?;
@@ -72,4 +106,26 @@ pub async fn run() -> Result<()> {
     stdout().execute(LeaveAlternateScreen)?;
 
     Ok(())
+}
+
+fn should_launch_in_ghostty(config: &Config, args: &DashboardArgs) -> bool {
+    if args.inline || args.no_ghostty {
+        return false;
+    }
+
+    if args.ghostty {
+        return true;
+    }
+
+    config.dashboard.launch_in_ghostty && !running_inside_ghostty()
+}
+
+fn running_inside_ghostty() -> bool {
+    std::env::var("TERM_PROGRAM")
+        .map(|value| value.eq_ignore_ascii_case("ghostty"))
+        .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
 }

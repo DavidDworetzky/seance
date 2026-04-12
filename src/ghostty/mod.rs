@@ -22,25 +22,30 @@ impl GhosttyBackend {
     /// Create a new Ghostty window at the given path and position.
     pub fn create_window(&self, cwd: &Path, bounds: &WindowBounds) -> Result<GhosttyWindow> {
         let script = applescript::create_window(cwd, bounds);
-        let output = applescript::run_capture(&script)?;
-        let mut parts = output.splitn(2, ',');
-        let window_id = parts
-            .next()
-            .map(str::trim)
-            .filter(|part| !part.is_empty())
-            .ok_or_else(|| anyhow::anyhow!("Ghostty did not return a window id"))?;
-        let terminal_id = parts
-            .next()
-            .map(str::trim)
-            .filter(|part| !part.is_empty())
-            .ok_or_else(|| anyhow::anyhow!("Ghostty did not return a terminal id"))?;
-
-        Ok(GhosttyWindow {
-            window_id: window_id.to_string(),
-            terminal_id: terminal_id.to_string(),
-        })
+        parse_window(applescript::run_capture(&script)?)
     }
+}
 
+fn parse_window(output: String) -> Result<GhosttyWindow> {
+    let mut parts = output.splitn(2, ',');
+    let window_id = parts
+        .next()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Ghostty did not return a window id"))?;
+    let terminal_id = parts
+        .next()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("Ghostty did not return a terminal id"))?;
+
+    Ok(GhosttyWindow {
+        window_id: window_id.to_string(),
+        terminal_id: terminal_id.to_string(),
+    })
+}
+
+impl GhosttyBackend {
     /// Split the current pane to the right.
     pub fn split_right(&self, terminal_id: &str) -> Result<String> {
         let script = applescript::split_direction(terminal_id, "right");

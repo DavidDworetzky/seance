@@ -65,11 +65,7 @@ pub enum Command {
     Clean(command::clean::CleanArgs),
 
     /// Open the TUI dashboard
-    Dashboard {
-        /// Run the TUI inline in the current terminal (used internally)
-        #[arg(long, hide = true)]
-        inline: bool,
-    },
+    Dashboard(crate::dashboard::DashboardArgs),
 
     /// Manage configuration
     Config(command::config::ConfigArgs),
@@ -78,8 +74,8 @@ pub enum Command {
 pub async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         None => {
-            // Default: launch TUI dashboard in a Ghostty window
-            crate::dashboard::run_in_ghostty().await
+            // Default: launch TUI dashboard
+            crate::dashboard::run_default().await
         }
         Some(cmd) => match cmd {
             Command::Add(args) => command::add::run(args).await,
@@ -98,13 +94,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             Command::Detect(args) => command::detect::run(args).await,
             Command::Init(args) => command::init::run(args).await,
             Command::Clean(args) => command::clean::run(args).await,
-            Command::Dashboard { inline } => {
-                if inline {
-                    crate::dashboard::run().await
-                } else {
-                    crate::dashboard::run_in_ghostty().await
-                }
-            }
+            Command::Dashboard(args) => crate::dashboard::run_entry(args).await,
             Command::Config(args) => command::config::run(args).await,
         },
     }
