@@ -29,6 +29,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     render_spirit_table(frame, chunks[1], app);
     render_preview(frame, chunks[2], app);
     render_status_bar(frame, chunks[3], app);
+    render_repo_picker(frame, app);
 }
 
 fn render_header(frame: &mut Frame, area: Rect, app: &App) {
@@ -172,13 +173,123 @@ fn render_preview(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
-    let help = if app.input_mode {
+    let help = if app.repo_picker.is_some() {
+        "Repo picker: j/k navigate  Enter: create worktree  Esc: cancel"
+    } else if app.input_mode {
         "Esc: exit input | type to send to spirit"
     } else {
-        "j/k: navigate  Enter: jump  Tab: toggle agent  i: input  x/Del: delete  m: merge  d: diff  q: quit"
+        "j/k: navigate  Enter: jump  Tab: toggle agent  a: add worktree  i: input  x/Del: delete  m: merge  d: diff  q: quit"
     };
 
-    let bar = Paragraph::new(help).style(Style::default().fg(Color::DarkGray));
+    let mut text = help.to_string();
+    if let Some(message) = &app.status_message {
+        text.push_str("  |  ");
+        text.push_str(message);
+    }
+
+    let bar = Paragraph::new(text).style(Style::default().fg(Color::DarkGray));
 
     frame.render_widget(bar, area);
+}
+
+fn render_repo_picker(frame: &mut Frame, app: &App) {
+    let Some(picker) = &app.repo_picker else {
+        return;
+    };
+
+    let width = frame.area().width.saturating_sub(12).min(100).max(40);
+    let height = frame.area().height.saturating_sub(8).min(18).max(8);
+    let popup = centered_rect(width, height, frame.area());
+
+    frame.render_widget(Clear, popup);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(4), Constraint::Length(2)])
+        .split(popup);
+
+    let max_items = rows[0].height.saturating_sub(2) as usize;
+    let start = if picker.selected >= max_items && max_items > 0 {
+        picker.selected + 1 - max_items
+    } else {
+        0
+    };
+    let end = if max_items > 0 {
+        (start + max_items).min(picker.repos.len())
+    } else {
+        picker.repos.len()
+    };
+
+    let items: Vec<ListItem> = picker
+        .repos
+        .iter()
+        .enumerate()
+        .skip(start)
+        .take(end.saturating_sub(start))
+        .enumerate()
+        .map(|(offset, (_index, repo))| {
+            let absolute = start + offset;
+            let marker = if absolute == picker.selected {
+                "▸"
+            } else {
+                " "
+            };
+            let config = if repo.has_config { "cfg" } else { "default" };
+            ListItem::new(format!(
+                "{} {}  [{} | {}]",
+                marker,
+                repo.path.display(),
+                repo.project_type,
+                config
+            ))
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" add worktree "),
+        )
+        .highlight_style(
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        );
+    frame.render_widget(list, rows[0]);
+
+    let detail = picker
+        .error
+        .as_deref()
+        .map(|error| format!("Error: {}", error))
+        .unwrap_or_else(|| "Choose an autodetected repo and press Enter.".to_string());
+
+    let footer = Paragraph::new(detail)
+        .style(Style::default().fg(if picker.error.is_some() {
+            Color::Red
+        } else {
+            Color::DarkGray
+        }))
+        .block(Block::default().borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM));
+    frame.render_widget(footer, rows[1]);
+}
+
+fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(height),
+            Constraint::Fill(1),
+        ])
+        .split(area);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Fill(1),
+            Constraint::Length(width),
+            Constraint::Fill(1),
+        ])
+        .split(vertical[1])[1]
 }

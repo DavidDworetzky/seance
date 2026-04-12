@@ -1,6 +1,7 @@
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 
+use crate::command::detect::DetectedRepo;
 use crate::config::schema::Config;
 use crate::session::store::{QuadrantState, SessionStore};
 
@@ -13,7 +14,15 @@ pub struct App {
     pub filter: Option<String>,
     pub input_mode: bool,
     pub should_quit: bool,
+    pub status_message: Option<String>,
+    pub repo_picker: Option<RepoPickerState>,
     last_refresh: std::time::Instant,
+}
+
+pub struct RepoPickerState {
+    pub repos: Vec<DetectedRepo>,
+    pub selected: usize,
+    pub error: Option<String>,
 }
 
 impl App {
@@ -31,12 +40,19 @@ impl App {
             filter: None,
             input_mode: false,
             should_quit: false,
+            status_message: None,
+            repo_picker: None,
             last_refresh: std::time::Instant::now(),
         })
     }
 
     /// Handle a key event. Returns true if the app should quit.
     pub async fn handle_key(&mut self, key: KeyEvent) -> Result<bool> {
+        if self.repo_picker.is_some() {
+            self.handle_repo_picker_key(key)?;
+            return Ok(false);
+        }
+
         if self.input_mode {
             match key.code {
                 KeyCode::Esc => {
@@ -118,7 +134,7 @@ impl App {
                 self.input_mode = true;
             }
             KeyCode::Char('a') => {
-                // TODO: interactive add
+                self.open_repo_picker();
             }
             KeyCode::Char('m') => {
                 // TODO: merge selected
@@ -129,7 +145,10 @@ impl App {
                     let ghostty = crate::ghostty::GhosttyBackend::new();
                     let mut store = SessionStore::load()?;
                     crate::command::remove::delete_quadrant(
-                        &self.config, &ghostty, &mut store, &q,
+                        &self.config,
+                        &ghostty,
+                        &mut store,
+                        &q,
                     )?;
                     // Refresh local state
                     self.quadrants = store.active_quadrants();
@@ -155,6 +174,48 @@ impl App {
         Ok(false)
     }
 
+    fn handle_repo_picker_key(&mut self, key: KeyEvent) -> Result<()> {
+        let Some(mut picker) = self.repo_picker.take() else {
+            return Ok(());
+        };
+
+        match key.code {
+            KeyCode::Esc => {
+                self.status_message = Some("Add worktree cancelled.".to_string());
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if !picker.repos.is_empty() {
+                    picker.selected = (picker.selected + 1) % picker.repos.len();
+                }
+                self.repo_picker = Some(picker);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if !picker.repos.is_empty() {
+                    picker.selected = picker
+                        .selected
+                        .checked_sub(1)
+                        .unwrap_or(picker.repos.len().saturating_sub(1));
+                }
+                self.repo_picker = Some(picker);
+            }
+            KeyCode::Enter => {
+                let repo = picker.repos[picker.selected].clone();
+                match self.create_worktree_for_repo(&repo) {
+                    Ok(()) => {}
+                    Err(err) => {
+                        picker.error = Some(err.to_string());
+                        self.repo_picker = Some(picker);
+                    }
+                }
+            }
+            _ => {
+                self.repo_picker = Some(picker);
+            }
+        }
+
+        Ok(())
+    }
+
     fn clamp_preview_agent(&mut self) {
         let count = self
             .quadrants
@@ -167,22 +228,84 @@ impl App {
         }
     }
 
-    /// Periodic refresh of spirit status.
-    pub async fn refresh(&mut self) -> Result<()> {
-        if self.last_refresh.elapsed() < std::time::Duration::from_secs(2) {
-            return Ok(());
+    fn open_repo_picker(&mut self) {
+        match crate::command::detect::discover_repositories(&[]) {
+            Ok(repos) if repos.is_empty() => {
+                self.status_message = Some("No autodetected repos found.".to_string());
+            }
+            Ok(mut repos) => {
+                repos.sort_by(|left, right| {
+                    right
+                        .has_config
+                        .cmp(&left.has_config)
+                        .then_with(|| left.path.cmp(&right.path))
+                });
+                self.repo_picker = Some(RepoPickerState {
+                    repos,
+                    selected: 0,
+                    error: None,
+                });
+                self.status_message = Some("Select a repo to create a worktree.".to_string());
+            }
+            Err(err) => {
+                self.status_message = Some(format!("Repo scan failed: {}", err));
+            }
         }
-        self.last_refresh = std::time::Instant::now();
+    }
 
-        // Reload session store
+    fn create_worktree_for_repo(&mut self, repo: &DetectedRepo) -> Result<()> {
+        let created = crate::command::add::run_in_repo(
+            crate::command::add::AddArgs {
+                branch: None,
+                prompt: None,
+                prompt_file: None,
+                agent: None,
+                quadrant: None,
+                monitor: 0,
+                base: None,
+                auto_name: false,
+                no_file_ops: false,
+                circle: false,
+            },
+            &repo.path,
+        )?;
+
+        if let Some(created) = created.first() {
+            self.status_message = Some(format!(
+                "Created {} in Q{} on monitor {}.",
+                created.branch, created.quadrant, created.monitor
+            ));
+        }
+        self.repo_picker = None;
+        self.refresh_now()?;
+
+        if let Some(created) = created.first() {
+            if let Some(index) = self
+                .quadrants
+                .iter()
+                .position(|q| q.branch == created.branch && q.monitor == created.monitor)
+            {
+                self.selected = index;
+                self.clamp_preview_agent();
+            }
+        }
+
+        Ok(())
+    }
+
+    fn refresh_now(&mut self) -> Result<()> {
+        self.last_refresh = std::time::Instant::now();
         let store = SessionStore::load()?;
         self.quadrants = store.active_quadrants();
         if self.selected >= self.quadrants.len() && !self.quadrants.is_empty() {
             self.selected = self.quadrants.len() - 1;
         }
         self.clamp_preview_agent();
+        self.update_preview();
+        Ok(())
+    }
 
-        // Update preview content
+    fn update_preview(&mut self) {
         if let Some(q) = self.quadrants.get(self.selected) {
             let agents = q.ordered_agent_names(&self.config.group);
             if let Some(agent_name) = agents.get(self.preview_agent) {
@@ -193,9 +316,18 @@ impl App {
                         .capture_pane_title(&q.window_title(agent_name))
                         .unwrap_or_default(),
                 };
+                return;
             }
         }
 
-        Ok(())
+        self.preview_content.clear();
+    }
+
+    /// Periodic refresh of spirit status.
+    pub async fn refresh(&mut self) -> Result<()> {
+        if self.last_refresh.elapsed() < std::time::Duration::from_secs(2) {
+            return Ok(());
+        }
+        self.refresh_now()
     }
 }

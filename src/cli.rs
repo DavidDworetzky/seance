@@ -58,6 +58,9 @@ pub enum Command {
     /// Scan for git repos in common directories
     Detect(command::detect::DetectArgs),
 
+    /// Select a detected repo and open Seance there
+    Repo(command::repo::RepoArgs),
+
     /// Interactive project initialization
     Init(command::init::InitArgs),
 
@@ -92,6 +95,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             Command::Focus(args) => command::focus::run(args).await,
             Command::Checkout(args) => command::checkout::run(args).await,
             Command::Detect(args) => command::detect::run(args).await,
+            Command::Repo(args) => command::repo::run(args).await,
             Command::Init(args) => command::init::run(args).await,
             Command::Clean(args) => command::clean::run(args).await,
             Command::Dashboard(args) => crate::dashboard::run_entry(args).await,

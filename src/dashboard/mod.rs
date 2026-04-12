@@ -12,8 +12,8 @@ use crossterm::{
 use ratatui::prelude::*;
 use std::io::stdout;
 
-use app::App;
 use crate::config::schema::Config;
+use app::App;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct DashboardArgs {
@@ -127,5 +127,4 @@ fn running_inside_ghostty() -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-}
+mod tests {}

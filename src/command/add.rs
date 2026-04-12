@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Args;
+use std::path::Path;
 
 use crate::agent;
 use crate::config::schema::Config;
@@ -52,14 +53,27 @@ pub struct AddArgs {
 }
 
 pub async fn run(args: AddArgs) -> Result<()> {
-    let config = Config::load(None)?;
+    let repo_path = crate::git::repo_root(&std::env::current_dir()?)?;
+    run_in_repo(args, &repo_path)?;
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+pub struct CreatedQuadrant {
+    pub branch: String,
+    pub quadrant: u8,
+    pub monitor: u8,
+}
+
+pub fn run_in_repo(args: AddArgs, repo_path: &Path) -> Result<Vec<CreatedQuadrant>> {
+    let config = Config::load(Some(repo_path))?;
     let mut store = SessionStore::load()?;
     let ghostty = GhosttyBackend::new();
     let assigner = QuadrantAssigner::new(&store, config.quadrants_per_monitor);
     let prompt_content =
         crate::agent::prompt::resolve_prompt(args.prompt.as_deref(), args.prompt_file.as_deref())?;
 
-    let repo_path = crate::git::repo_root(&std::env::current_dir()?)?
+    let repo_path = crate::git::repo_root(repo_path)?
         .to_string_lossy()
         .to_string();
     let auto_name_requested = args.auto_name || config.auto_name.enabled;
@@ -76,6 +90,8 @@ pub async fn run(args: AddArgs) -> Result<()> {
 
     let session_name = branch_seed.as_deref().unwrap_or("seance");
     let session_id = store.ensure_active_session(session_name, &repo_path)?;
+    let mut created = Vec::new();
+    let repo_path = Path::new(&repo_path);
 
     if args.circle {
         let count = config.quadrants_per_monitor;
@@ -88,38 +104,70 @@ pub async fn run(args: AddArgs) -> Result<()> {
             let branch = branch_seed
                 .as_deref()
                 .map(|seed| format!("{}-{}", seed, q))
-                .unwrap_or_else(|| format!("seance-{}", q));
-            create_quadrant(
+                .unwrap_or_else(|| unique_default_branch(repo_path, q));
+            created.push(create_quadrant(
                 &config,
                 &ghostty,
                 &mut store,
                 &session_id,
+                repo_path,
                 &branch,
                 q,
                 args.monitor,
                 &args,
                 prompt_content.as_deref(),
-            )?;
+            )?);
         }
     } else {
-        let branch = branch_seed.unwrap_or_else(|| "seance-1".into());
         let quadrant = args
             .quadrant
             .unwrap_or_else(|| assigner.next_available_for(&store, args.monitor));
-        create_quadrant(
+        let branch = branch_seed.unwrap_or_else(|| unique_default_branch(repo_path, quadrant));
+        created.push(create_quadrant(
             &config,
             &ghostty,
             &mut store,
             &session_id,
+            repo_path,
             &branch,
             quadrant,
             args.monitor,
             &args,
             prompt_content.as_deref(),
-        )?;
+        )?);
     }
 
-    Ok(())
+    Ok(created)
+}
+
+fn unique_default_branch(repo_path: &Path, quadrant: u8) -> String {
+    let base = format!("seance-{}", quadrant);
+    if !branch_exists(repo_path, &base) {
+        return base;
+    }
+
+    let mut suffix = 2;
+    loop {
+        let candidate = format!("{}-{}", base, suffix);
+        if !branch_exists(repo_path, &candidate) {
+            return candidate;
+        }
+        suffix += 1;
+    }
+}
+
+fn branch_exists(repo_path: &Path, branch: &str) -> bool {
+    std::process::Command::new("git")
+        .args([
+            "show-ref",
+            "--verify",
+            "--quiet",
+            &format!("refs/heads/{}", branch),
+        ])
+        .current_dir(repo_path)
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
 }
 
 fn create_quadrant(
@@ -127,12 +175,13 @@ fn create_quadrant(
     ghostty: &GhosttyBackend,
     store: &mut SessionStore,
     session_id: &str,
+    repo_path: &Path,
     branch: &str,
     quadrant: u8,
     monitor: u8,
     args: &AddArgs,
     prompt_content: Option<&str>,
-) -> Result<()> {
+) -> Result<CreatedQuadrant> {
     let base = args
         .base
         .as_deref()
@@ -140,7 +189,7 @@ fn create_quadrant(
         .unwrap_or(&config.main_branch);
 
     // 1. Create worktree
-    let wt_path = worktree::create(config, branch, base)?;
+    let wt_path = worktree::create_in_repo(config, repo_path, branch, base)?;
     println!("  Created worktree: {}", wt_path.display());
 
     // 2. File operations
@@ -200,5 +249,61 @@ fn create_quadrant(
     store.add_quadrant(session_id, quadrant_state)?;
 
     println!("  Q{} ready on monitor {}", quadrant, monitor);
-    Ok(())
+    Ok(CreatedQuadrant {
+        branch: branch.to_string(),
+        quadrant,
+        monitor,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn init_git_repo(path: &Path) {
+        let status = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let status = std::process::Command::new("git")
+            .args([
+                "-c",
+                "user.name=Test User",
+                "-c",
+                "user.email=test@example.com",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "init",
+            ])
+            .current_dir(path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    fn test_unique_default_branch_uses_base_name_when_available() {
+        let dir = tempfile::tempdir().unwrap();
+        init_git_repo(dir.path());
+        assert_eq!(unique_default_branch(dir.path(), 1), "seance-1");
+    }
+
+    #[test]
+    fn test_unique_default_branch_increments_when_branch_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        init_git_repo(dir.path());
+
+        let status = std::process::Command::new("git")
+            .args(["branch", "seance-1"])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        assert_eq!(unique_default_branch(dir.path(), 1), "seance-1-2");
+    }
 }

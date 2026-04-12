@@ -163,13 +163,39 @@ fn install_keybindings() -> Result<()> {
         .join("ghostty")
         .join("config");
 
-    let keybindings = r#"
+    let keybindings = seance_keybindings_block();
+
+    if ghostty_config.exists() {
+        let mut contents = std::fs::read_to_string(&ghostty_config)?;
+        if contents.contains("keybind = ctrl+s>r=text:seance repo\\n") {
+            println!("Keybindings already installed.");
+            return Ok(());
+        }
+        if contents.contains("# Seance keybindings") {
+            contents.push_str("keybind = ctrl+s>r=text:seance repo\\n\n");
+        } else {
+            contents.push_str(&keybindings);
+        }
+        std::fs::write(&ghostty_config, contents)?;
+    } else {
+        std::fs::create_dir_all(ghostty_config.parent().unwrap())?;
+        std::fs::write(&ghostty_config, keybindings)?;
+    }
+
+    println!("Installed keybindings to {}", ghostty_config.display());
+    println!("Reload Ghostty config to activate.");
+    Ok(())
+}
+
+fn seance_keybindings_block() -> String {
+    r#"
 # Seance keybindings
 keybind = ctrl+s>d=text:seance\n
 keybind = ctrl+s>a=text:seance add\n
 keybind = ctrl+s>c=text:seance add --circle\n
 keybind = ctrl+s>x=text:seance remove\n
 keybind = ctrl+s>m=text:seance merge\n
+keybind = ctrl+s>r=text:seance repo\n
 keybind = ctrl+s>z=text:seance sleep\n
 keybind = ctrl+s>w=text:seance wake\n
 keybind = ctrl+s>l=text:seance list\n
@@ -183,24 +209,8 @@ keybind = ctrl+s>7=text:seance focus 7\n
 keybind = ctrl+s>8=text:seance focus 8\n
 keybind = ctrl+s>n=text:seance focus --next\n
 keybind = ctrl+s>p=text:seance focus --prev\n
-"#;
-
-    if ghostty_config.exists() {
-        let mut contents = std::fs::read_to_string(&ghostty_config)?;
-        if contents.contains("# Seance keybindings") {
-            println!("Keybindings already installed.");
-            return Ok(());
-        }
-        contents.push_str(keybindings);
-        std::fs::write(&ghostty_config, contents)?;
-    } else {
-        std::fs::create_dir_all(ghostty_config.parent().unwrap())?;
-        std::fs::write(&ghostty_config, keybindings)?;
-    }
-
-    println!("Installed keybindings to {}", ghostty_config.display());
-    println!("Reload Ghostty config to activate.");
-    Ok(())
+"#
+    .to_string()
 }
 
 #[cfg(test)]
@@ -219,5 +229,11 @@ mod tests {
         let parsed: crate::config::schema::Config = serde_yml::from_str(&yaml).unwrap();
         let codex = parsed.agents.get("codex").unwrap();
         assert_eq!(codex.command, crate::agent::codex::COMMAND);
+    }
+
+    #[test]
+    fn test_keybindings_block_includes_repo_shortcut() {
+        let block = seance_keybindings_block();
+        assert!(block.contains("keybind = ctrl+s>r=text:seance repo\\n"));
     }
 }

@@ -6,9 +6,15 @@ use crate::layout::quadrant::WindowBounds;
 
 /// Execute an AppleScript and return Ok on success.
 pub fn run(script: &str) -> Result<()> {
+    run_with_args(script, &[])
+}
+
+/// Execute an AppleScript with argv and return Ok on success.
+pub fn run_with_args(script: &str, args: &[&str]) -> Result<()> {
     let output = Command::new("osascript")
         .arg("-e")
         .arg(script)
+        .args(args)
         .output()
         .context("Failed to run osascript")?;
 
@@ -22,9 +28,15 @@ pub fn run(script: &str) -> Result<()> {
 
 /// Execute an AppleScript and return its stdout.
 pub fn run_capture(script: &str) -> Result<String> {
+    run_capture_with_args(script, &[])
+}
+
+/// Execute an AppleScript with argv and return its stdout.
+pub fn run_capture_with_args(script: &str, args: &[&str]) -> Result<String> {
     let output = Command::new("osascript")
         .arg("-e")
         .arg(script)
+        .args(args)
         .output()
         .context("Failed to run osascript")?;
 
@@ -38,6 +50,7 @@ pub fn run_capture(script: &str) -> Result<String> {
 
 /// Create a new Ghostty window with a specific working directory and bounds.
 pub fn create_window(cwd: &Path, bounds: &WindowBounds) -> String {
+    let escaped_cwd = escape_applescript(&cwd.display().to_string());
     format!(
         r#"tell application "Ghostty"
     set cfg to new surface configuration
@@ -47,7 +60,7 @@ pub fn create_window(cwd: &Path, bounds: &WindowBounds) -> String {
     set pane to selected terminal of selected tab of win
     return (id of win as string) & "," & (id of pane as string)
 end tell"#,
-        cwd.display(),
+        escaped_cwd,
         bounds.x,
         bounds.y,
         bounds.x + bounds.width,
@@ -69,29 +82,27 @@ end tell"#,
 }
 
 /// Send text to a specific terminal.
-pub fn send_text(terminal_id: &str, text: &str) -> String {
-    let escaped_terminal_id = escape_applescript(terminal_id);
-    let escaped = escape_applescript(text);
-    format!(
-        r#"tell application "Ghostty"
-    set targetTerminal to first terminal whose (id as string) is "{}"
-    input text "{}" to targetTerminal
-end tell"#,
-        escaped_terminal_id, escaped,
-    )
+pub fn send_text_script() -> &'static str {
+    r#"on run argv
+    set terminalId to item 1 of argv
+    set payload to item 2 of argv
+    tell application "Ghostty"
+        set targetTerminal to first terminal whose (id as string) is terminalId
+        input text payload to targetTerminal
+    end tell
+end run"#
 }
 
 /// Send text to the first terminal in a window matched by title.
-pub fn send_text_to_window(window_title: &str, text: &str) -> String {
-    let escaped_text = text.replace('\\', "\\\\").replace('"', "\\\"");
-    let escaped_title = window_title.replace('"', "\\\"");
-    format!(
-        r#"tell application "Ghostty"
-    set targetWin to first window whose name contains "{}"
-    input text "{}" to terminal 1 of selected tab of targetWin
-end tell"#,
-        escaped_title, escaped_text,
-    )
+pub fn send_text_to_window_script() -> &'static str {
+    r#"on run argv
+    set windowTitle to item 1 of argv
+    set payload to item 2 of argv
+    tell application "Ghostty"
+        set targetWin to first window whose name contains windowTitle
+        input text payload to terminal 1 of selected tab of targetWin
+    end tell
+end run"#
 }
 
 /// Focus a window by id.
@@ -204,6 +215,18 @@ mod tests {
     }
 
     #[test]
+    fn test_create_window_escapes_quotes_in_path() {
+        let bounds = WindowBounds {
+            x: 0,
+            y: 0,
+            width: 960,
+            height: 540,
+        };
+        let script = create_window(Path::new("/tmp/with\"quote"), &bounds);
+        assert!(script.contains(r#"set initial working directory of cfg to "/tmp/with\"quote""#));
+    }
+
+    #[test]
     fn test_split_direction_script() {
         let script = split_direction("123", "right");
         assert!(script.contains(r#"(id as string) is "123""#));
@@ -215,9 +238,9 @@ mod tests {
 
     #[test]
     fn test_send_text_escapes_quotes() {
-        let script = send_text("123", "say \"hello\"");
-        assert!(script.contains(r#"(id as string) is "123""#));
-        assert!(script.contains(r#"say \"hello\""#));
+        let script = send_text_script();
+        assert!(script.contains("set terminalId to item 1 of argv"));
+        assert!(script.contains("input text payload to targetTerminal"));
     }
 
     #[test]
@@ -244,16 +267,16 @@ mod tests {
 
     #[test]
     fn test_send_text_to_terminal_script() {
-        let script = send_text("123", "hello world");
-        assert!(script.contains(r#"(id as string) is "123""#));
-        assert!(script.contains("hello world"));
+        let script = send_text_script();
+        assert!(script.contains("first terminal whose (id as string) is terminalId"));
+        assert!(script.contains("input text payload to targetTerminal"));
     }
 
     #[test]
     fn test_send_text_to_window_script() {
-        let script = send_text_to_window("seance-q1-claude", "hello world");
-        assert!(script.contains("name contains \"seance-q1-claude\""));
-        assert!(script.contains("hello world"));
+        let script = send_text_to_window_script();
+        assert!(script.contains("name contains windowTitle"));
+        assert!(script.contains("input text payload to terminal 1 of selected tab of targetWin"));
     }
 
     #[test]

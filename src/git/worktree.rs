@@ -11,8 +11,12 @@ pub enum RemoveOutcome {
 
 /// Resolve the worktree directory for a given config.
 fn worktree_base(config: &Config) -> Result<PathBuf> {
-    let cwd = std::env::current_dir()?;
-    let project_name = cwd
+    let repo_path = std::env::current_dir()?;
+    worktree_base_for(config, &repo_path)
+}
+
+fn worktree_base_for(config: &Config, repo_path: &Path) -> Result<PathBuf> {
+    let project_name = repo_path
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "project".into());
@@ -22,7 +26,7 @@ fn worktree_base(config: &Config) -> Result<PathBuf> {
     let base = if dir.starts_with('/') {
         PathBuf::from(&dir)
     } else {
-        cwd.join(&dir)
+        repo_path.join(&dir)
     };
 
     Ok(base)
@@ -30,7 +34,18 @@ fn worktree_base(config: &Config) -> Result<PathBuf> {
 
 /// Create a new git worktree for the given branch.
 pub fn create(config: &Config, branch: &str, base_branch: &str) -> Result<PathBuf> {
-    let wt_base = worktree_base(config)?;
+    let repo_path = std::env::current_dir()?;
+    create_in_repo(config, &repo_path, branch, base_branch)
+}
+
+/// Create a new git worktree for the given branch in a specific repo.
+pub fn create_in_repo(
+    config: &Config,
+    repo_path: &Path,
+    branch: &str,
+    base_branch: &str,
+) -> Result<PathBuf> {
+    let wt_base = worktree_base_for(config, repo_path)?;
     let sanitized = branch.replace('/', "-");
     let wt_path = wt_base.join(&sanitized);
 
@@ -39,7 +54,7 @@ pub fn create(config: &Config, branch: &str, base_branch: &str) -> Result<PathBu
         std::fs::create_dir_all(parent)?;
     }
 
-    let status = std::process::Command::new("git")
+    let output = std::process::Command::new("git")
         .args([
             "worktree",
             "add",
@@ -48,11 +63,16 @@ pub fn create(config: &Config, branch: &str, base_branch: &str) -> Result<PathBu
             branch,
             base_branch,
         ])
-        .status()
+        .current_dir(repo_path)
+        .output()
         .context("Failed to create git worktree")?;
 
-    if !status.success() {
-        anyhow::bail!("git worktree add failed for branch: {}", branch);
+    if !output.status.success() {
+        anyhow::bail!(
+            "git worktree add failed for {}: {}",
+            branch,
+            command_error(&output)
+        );
     }
 
     Ok(wt_path)

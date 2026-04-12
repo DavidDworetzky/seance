@@ -60,14 +60,15 @@ impl GhosttyBackend {
 
     /// Send text to a specific Ghostty pane.
     pub fn send_text(&self, terminal_id: &str, text: &str) -> Result<()> {
-        let script = applescript::send_text(terminal_id, text);
-        applescript::run(&script)
+        applescript::run_with_args(applescript::send_text_script(), &[terminal_id, text])
     }
 
     /// Send text to the first pane in a window matched by title.
     pub fn send_text_to_window(&self, window_title: &str, text: &str) -> Result<()> {
-        let script = applescript::send_text_to_window(window_title, text);
-        applescript::run(&script)
+        applescript::run_with_args(
+            applescript::send_text_to_window_script(),
+            &[window_title, text],
+        )
     }
 
     /// Focus a window by id.
