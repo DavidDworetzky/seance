@@ -52,7 +52,7 @@ fn remove_one(
 /// Delete a quadrant: close its window, remove worktree, delete branch, and update session store.
 /// Shared between the CLI `remove` command and the TUI dashboard.
 pub fn delete_quadrant(
-    config: &Config,
+    _config: &Config,
     ghostty: &GhosttyBackend,
     store: &mut SessionStore,
     quadrant: &crate::session::store::QuadrantState,
@@ -67,7 +67,7 @@ pub fn delete_quadrant(
     }
 
     // Remove worktree
-    if let Err(e) = crate::git::worktree::remove(config, &quadrant.branch) {
+    if let Err(e) = crate::git::worktree::remove_path(&quadrant.worktree_path, &quadrant.branch) {
         tracing::warn!("Could not remove worktree for {}: {}", quadrant.branch, e);
     }
 

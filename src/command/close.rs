@@ -25,6 +25,7 @@ pub async fn run(args: CloseArgs) -> Result<()> {
     let config = crate::config::schema::Config::load(None)?;
     let mut store = crate::session::store::SessionStore::load()?;
     let ghostty = crate::ghostty::GhosttyBackend::new();
+    let quadrant = store.find_quadrant(&args.branch);
 
     let strategy = if args.rebase {
         MergeStrategy::Rebase
@@ -35,7 +36,10 @@ pub async fn run(args: CloseArgs) -> Result<()> {
     };
 
     // 1. Pre-merge hooks
-    let wt_path = crate::git::worktree::path_for(&config, &args.branch)?;
+    let wt_path = quadrant
+        .as_ref()
+        .map(|q| q.worktree_path.clone())
+        .unwrap_or(crate::git::worktree::path_for(&config, &args.branch)?);
     for hook in &config.pre_merge {
         println!("Running pre-merge hook: {}", hook);
         crate::files::ops::run_hook(hook, &wt_path)?;
@@ -46,10 +50,15 @@ pub async fn run(args: CloseArgs) -> Result<()> {
     println!("Merged {} using {:?} strategy", args.branch, strategy);
 
     if !args.keep {
-        let quadrant = store.find_quadrant(&args.branch);
-
         // 3. Remove worktree
-        crate::git::worktree::remove(&config, &args.branch)?;
+        match quadrant.as_ref() {
+            Some(q) => {
+                crate::git::worktree::remove_path(&q.worktree_path, &args.branch)?;
+            }
+            None => {
+                crate::git::worktree::remove(&config, &args.branch)?;
+            }
+        }
 
         // 4. Delete branch
         crate::git::branch::delete(&args.branch)?;
