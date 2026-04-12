@@ -65,7 +65,7 @@ pub enum Command {
     Clean(command::clean::CleanArgs),
 
     /// Open the TUI dashboard
-    Dashboard,
+    Dashboard(crate::dashboard::DashboardArgs),
 
     /// Manage configuration
     Config(command::config::ConfigArgs),
@@ -75,7 +75,7 @@ pub async fn run(cli: Cli) -> Result<()> {
     match cli.command {
         None => {
             // Default: launch TUI dashboard
-            crate::dashboard::run().await
+            crate::dashboard::run_default().await
         }
         Some(cmd) => match cmd {
             Command::Add(args) => command::add::run(args).await,
@@ -94,7 +94,7 @@ pub async fn run(cli: Cli) -> Result<()> {
             Command::Detect(args) => command::detect::run(args).await,
             Command::Init(args) => command::init::run(args).await,
             Command::Clean(args) => command::clean::run(args).await,
-            Command::Dashboard => crate::dashboard::run().await,
+            Command::Dashboard(args) => crate::dashboard::run_entry(args).await,
             Command::Config(args) => command::config::run(args).await,
         },
     }

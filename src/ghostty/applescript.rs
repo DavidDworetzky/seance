@@ -55,6 +55,20 @@ end tell"#,
     )
 }
 
+/// Create a new Ghostty window with the given working directory.
+pub fn create_window_default(cwd: &Path) -> String {
+    format!(
+        r#"tell application "Ghostty"
+    set cfg to new surface configuration
+    set initial working directory of cfg to "{}"
+    set win to new window with configuration cfg
+    set pane to selected terminal of selected tab of win
+    return (id of win as string) & "," & (id of pane as string)
+end tell"#,
+        cwd.display(),
+    )
+}
+
 /// Split the current pane in a given direction.
 pub fn split_direction(terminal_id: &str, direction: &str) -> String {
     format!(
@@ -202,6 +216,14 @@ mod tests {
 
         let script = split_direction("123", "down");
         assert!(script.contains("direction down"));
+    }
+
+    #[test]
+    fn test_create_window_default_script() {
+        let script = create_window_default(Path::new("/tmp/worktree"));
+        assert!(script.contains("Ghostty"));
+        assert!(script.contains("/tmp/worktree"));
+        assert!(script.contains("return (id of win as string)"));
     }
 
     #[test]

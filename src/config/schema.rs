@@ -34,6 +34,9 @@ pub struct Config {
     /// Session defaults
     pub session: SessionConfig,
 
+    /// Dashboard behavior
+    pub dashboard: DashboardConfig,
+
     /// TUI theme
     pub theme: String,
 
@@ -86,6 +89,7 @@ impl Default for Config {
             files: FileConfig::default(),
             merge_strategy: MergeStrategy::Squash,
             session: SessionConfig::default(),
+            dashboard: DashboardConfig::default(),
             theme: "dark".into(),
             status_icons: StatusIcons::default(),
             monitors: MonitorConfig::default(),
@@ -171,6 +175,20 @@ impl Default for SessionConfig {
             auto_sleep_after: None,
             max_terminal_capture: 500,
             persist_shell_history: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DashboardConfig {
+    pub launch_in_ghostty: bool,
+}
+
+impl Default for DashboardConfig {
+    fn default() -> Self {
+        Self {
+            launch_in_ghostty: false,
         }
     }
 }

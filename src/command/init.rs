@@ -102,6 +102,9 @@ agents:
     auto_name: false
 
 merge_strategy: squash
+
+dashboard:
+  launch_in_ghostty: false
 "#,
         main_branch,
         yaml_quote(crate::agent::claude::COMMAND),
