@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Args;
 
-use crate::ghostty::GhosttyBackend;
+use crate::ghostty::{GhosttyBackend, WindowId, WindowTitle};
 use crate::session::store::SessionStore;
 
 #[derive(Args)]
@@ -26,10 +26,10 @@ pub async fn run(args: FocusArgs) -> Result<()> {
 
     let q = if args.next || args.prev {
         let front_window = ghostty.front_window_id().ok();
-        let current_index = front_window.as_deref().and_then(|front| {
+        let current_index = front_window.as_ref().and_then(|front| {
             quadrants
                 .iter()
-                .position(|q| q.window_id.as_deref() == Some(front))
+                .position(|q| q.window_id.as_deref() == Some(front.as_ref()))
         });
         let index = if args.next {
             match current_index {
@@ -55,8 +55,14 @@ pub async fn run(args: FocusArgs) -> Result<()> {
     };
 
     match q.window_id.as_deref() {
-        Some(window_id) => ghostty.focus_window(window_id)?,
-        None => ghostty.focus_window_title(&q.main_window_title())?,
+        Some(window_id) => {
+            let window_id = WindowId::new(window_id.to_string())?;
+            ghostty.focus_window(&window_id)?
+        }
+        None => {
+            let window_title = WindowTitle::new(q.main_window_title())?;
+            ghostty.focus_window_title(&window_title)?
+        }
     }
     println!("Focused Q{} ({})", q.quadrant, q.branch);
 

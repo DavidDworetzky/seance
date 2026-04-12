@@ -3,6 +3,7 @@ mod cli;
 mod command;
 mod config;
 mod dashboard;
+mod debug;
 mod files;
 mod ghostty;
 mod git;

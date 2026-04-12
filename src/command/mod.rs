@@ -10,6 +10,7 @@ pub mod init;
 pub mod list;
 pub mod merge;
 pub mod remove;
+pub mod repo;
 pub mod send;
 pub mod sleep;
 pub mod status;

@@ -8,6 +8,7 @@ use serde_yml::Value;
 
 const PROJECT_CONFIG_NAME: &str = ".seance.yaml";
 const GLOBAL_CONFIG_DIR: &str = "seance";
+const GLOBAL_CONFIG_FILE: &str = "config.yaml";
 
 impl Config {
     /// Load config by searching up from `start_dir` for .seance.yaml,
@@ -20,20 +21,21 @@ impl Config {
                 .and_then(|d| find_config_upward(&d))
         });
 
-        let global_config = global_config_path();
+        let global_configs = global_config_paths();
 
         let mut merged =
             serde_yml::to_value(Config::default()).with_context(|| "serializing default config")?;
 
         // Load global first (lower priority)
-        if let Some(path) = &global_config {
-            if path.exists() {
-                let contents = std::fs::read_to_string(path)
-                    .with_context(|| format!("reading global config: {}", path.display()))?;
-                let value: Value = serde_yml::from_str(&contents)
-                    .with_context(|| format!("parsing global config: {}", path.display()))?;
-                merge_values(&mut merged, value);
+        for path in &global_configs {
+            if !path.exists() {
+                continue;
             }
+            let contents = std::fs::read_to_string(path)
+                .with_context(|| format!("reading global config: {}", path.display()))?;
+            let value: Value = serde_yml::from_str(&contents)
+                .with_context(|| format!("parsing global config: {}", path.display()))?;
+            merge_values(&mut merged, value);
         }
 
         // Override with project config (higher priority)
@@ -47,7 +49,12 @@ impl Config {
             }
         }
 
-        serde_yml::from_value(merged).with_context(|| "building merged config")
+        let config: Config =
+            serde_yml::from_value(merged).with_context(|| "building merged config")?;
+        config
+            .validate()
+            .with_context(|| "validating merged config")?;
+        Ok(config)
     }
 }
 
@@ -64,8 +71,25 @@ fn find_config_upward(start: &Path) -> Option<PathBuf> {
     }
 }
 
-fn global_config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join(GLOBAL_CONFIG_DIR).join("config.yaml"))
+fn global_config_paths() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+
+    if let Some(dir) = dirs::home_dir() {
+        paths.push(
+            dir.join(".config")
+                .join(GLOBAL_CONFIG_DIR)
+                .join(GLOBAL_CONFIG_FILE),
+        );
+    }
+
+    if let Some(dir) = dirs::config_dir() {
+        let path = dir.join(GLOBAL_CONFIG_DIR).join(GLOBAL_CONFIG_FILE);
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+
+    paths
 }
 
 fn merge_values(base: &mut Value, overlay: Value) {
@@ -126,5 +150,29 @@ mod tests {
         let config = Config::load(Some(dir.path())).unwrap();
         assert_eq!(config.main_branch, "main");
         assert_eq!(config.group, vec!["claude", "codex"]);
+    }
+
+    #[test]
+    fn test_load_rejects_invalid_project_config() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".seance.yaml"),
+            "group:\n  - missing-agent\n",
+        )
+        .unwrap();
+
+        let err = format!("{:#}", Config::load(Some(dir.path())).unwrap_err());
+        assert!(err.contains("validating merged config"));
+        assert!(err.contains("unknown agent 'missing-agent'"));
+    }
+
+    #[test]
+    fn test_global_config_paths_includes_xdg_style_location() {
+        let paths = global_config_paths();
+        assert!(
+            paths
+                .iter()
+                .any(|path| path.ends_with(".config/seance/config.yaml"))
+        );
     }
 }
