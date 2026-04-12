@@ -123,8 +123,21 @@ impl App {
             KeyCode::Char('m') => {
                 // TODO: merge selected
             }
-            KeyCode::Char('x') => {
-                // TODO: remove selected
+            KeyCode::Char('x') | KeyCode::Delete => {
+                // Delete selected branch: remove worktree, delete branch, update session
+                if let Some(q) = self.quadrants.get(self.selected).cloned() {
+                    let ghostty = crate::ghostty::GhosttyBackend::new();
+                    let mut store = SessionStore::load()?;
+                    crate::command::remove::delete_quadrant(
+                        &self.config, &ghostty, &mut store, &q,
+                    )?;
+                    // Refresh local state
+                    self.quadrants = store.active_quadrants();
+                    if self.selected >= self.quadrants.len() && !self.quadrants.is_empty() {
+                        self.selected = self.quadrants.len() - 1;
+                    }
+                    self.clamp_preview_agent();
+                }
             }
             KeyCode::Char('d') => {
                 // TODO: diff view
