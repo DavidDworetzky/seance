@@ -24,12 +24,6 @@ impl GhosttyBackend {
         let script = applescript::create_window(cwd, bounds);
         parse_window(applescript::run_capture(&script)?)
     }
-
-    /// Create a new Ghostty window at the given path.
-    pub fn create_window_default(&self, cwd: &Path) -> Result<GhosttyWindow> {
-        let script = applescript::create_window_default(cwd);
-        parse_window(applescript::run_capture(&script)?)
-    }
 }
 
 fn parse_window(output: String) -> Result<GhosttyWindow> {

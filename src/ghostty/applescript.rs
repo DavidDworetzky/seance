@@ -55,41 +55,29 @@ end tell"#,
     )
 }
 
-/// Create a new Ghostty window with the given working directory.
-pub fn create_window_default(cwd: &Path) -> String {
-    format!(
-        r#"tell application "Ghostty"
-    set cfg to new surface configuration
-    set initial working directory of cfg to "{}"
-    set win to new window with configuration cfg
-    set pane to selected terminal of selected tab of win
-    return (id of win as string) & "," & (id of pane as string)
-end tell"#,
-        cwd.display(),
-    )
-}
-
 /// Split the current pane in a given direction.
 pub fn split_direction(terminal_id: &str, direction: &str) -> String {
+    let escaped_terminal_id = escape_applescript(terminal_id);
     format!(
         r#"tell application "Ghostty"
-    set targetTerminal to first terminal whose id is {}
+    set targetTerminal to first terminal whose (id as string) is "{}"
     set newTerminal to split targetTerminal direction {}
     return id of newTerminal as string
 end tell"#,
-        terminal_id, direction,
+        escaped_terminal_id, direction,
     )
 }
 
 /// Send text to a specific terminal.
 pub fn send_text(terminal_id: &str, text: &str) -> String {
-    let escaped = text.replace('\\', "\\\\").replace('"', "\\\"");
+    let escaped_terminal_id = escape_applescript(terminal_id);
+    let escaped = escape_applescript(text);
     format!(
         r#"tell application "Ghostty"
-    set targetTerminal to first terminal whose id is {}
+    set targetTerminal to first terminal whose (id as string) is "{}"
     input text "{}" to targetTerminal
 end tell"#,
-        terminal_id, escaped,
+        escaped_terminal_id, escaped,
     )
 }
 
@@ -108,13 +96,14 @@ end tell"#,
 
 /// Focus a window by id.
 pub fn focus_window(window_id: &str) -> String {
+    let escaped_window_id = escape_applescript(window_id);
     format!(
         r#"tell application "Ghostty"
     activate
-    set targetWin to first window whose id is {}
+    set targetWin to first window whose (id as string) is "{}"
     set index of targetWin to 1
 end tell"#,
-        window_id,
+        escaped_window_id,
     )
 }
 
@@ -133,12 +122,13 @@ end tell"#,
 
 /// Close a window by id.
 pub fn close_window(window_id: &str) -> String {
+    let escaped_window_id = escape_applescript(window_id);
     format!(
         r#"tell application "Ghostty"
-    set targetWin to first window whose id is {}
+    set targetWin to first window whose (id as string) is "{}"
     close targetWin
 end tell"#,
-        window_id,
+        escaped_window_id,
     )
 }
 
@@ -158,12 +148,13 @@ end tell"#,
 /// Note: Ghostty's AppleScript API for text capture may need adaptation
 /// based on the exact object model in your Ghostty version.
 pub fn capture_pane(terminal_id: &str) -> String {
+    let escaped_terminal_id = escape_applescript(terminal_id);
     format!(
         r#"tell application "Ghostty"
-    set targetTerminal to first terminal whose id is {}
+    set targetTerminal to first terminal whose (id as string) is "{}"
     return text of targetTerminal
 end tell"#,
-        terminal_id,
+        escaped_terminal_id,
     )
 }
 
@@ -185,6 +176,10 @@ pub fn front_window_id() -> String {
     return id of front window as string
 end tell"#
         .to_string()
+}
+
+fn escape_applescript(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
 #[cfg(test)]
@@ -211,7 +206,7 @@ mod tests {
     #[test]
     fn test_split_direction_script() {
         let script = split_direction("123", "right");
-        assert!(script.contains("id is 123"));
+        assert!(script.contains(r#"(id as string) is "123""#));
         assert!(script.contains("direction right"));
 
         let script = split_direction("123", "down");
@@ -219,17 +214,9 @@ mod tests {
     }
 
     #[test]
-    fn test_create_window_default_script() {
-        let script = create_window_default(Path::new("/tmp/worktree"));
-        assert!(script.contains("Ghostty"));
-        assert!(script.contains("/tmp/worktree"));
-        assert!(script.contains("return (id of win as string)"));
-    }
-
-    #[test]
     fn test_send_text_escapes_quotes() {
         let script = send_text("123", "say \"hello\"");
-        assert!(script.contains("id is 123"));
+        assert!(script.contains(r#"(id as string) is "123""#));
         assert!(script.contains(r#"say \"hello\""#));
     }
 
@@ -237,7 +224,7 @@ mod tests {
     fn test_focus_window_script() {
         let script = focus_window("456");
         assert!(script.contains("activate"));
-        assert!(script.contains("id is 456"));
+        assert!(script.contains(r#"(id as string) is "456""#));
         assert!(script.contains("set index"));
     }
 
@@ -252,13 +239,13 @@ mod tests {
     fn test_close_window_script() {
         let script = close_window("456");
         assert!(script.contains("close targetWin"));
-        assert!(script.contains("id is 456"));
+        assert!(script.contains(r#"(id as string) is "456""#));
     }
 
     #[test]
     fn test_send_text_to_terminal_script() {
         let script = send_text("123", "hello world");
-        assert!(script.contains("id is 123"));
+        assert!(script.contains(r#"(id as string) is "123""#));
         assert!(script.contains("hello world"));
     }
 
@@ -272,7 +259,7 @@ mod tests {
     #[test]
     fn test_capture_pane_script() {
         let script = capture_pane("123");
-        assert!(script.contains("id is 123"));
+        assert!(script.contains(r#"(id as string) is "123""#));
         assert!(script.contains("return text"));
     }
 

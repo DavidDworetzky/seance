@@ -188,7 +188,7 @@ pub struct DashboardConfig {
 impl Default for DashboardConfig {
     fn default() -> Self {
         Self {
-            launch_in_ghostty: false,
+            launch_in_ghostty: true,
         }
     }
 }

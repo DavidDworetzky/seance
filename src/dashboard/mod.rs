@@ -11,10 +11,10 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use std::io::stdout;
+use std::process::Command;
 
 use app::App;
 use crate::config::schema::Config;
-use crate::ghostty::GhosttyBackend;
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct DashboardArgs {
@@ -99,28 +99,25 @@ fn running_inside_ghostty() -> bool {
 fn launch_in_ghostty() -> Result<()> {
     let cwd = std::env::current_dir()?;
     let exe = std::env::current_exe()?;
-    let command = format!(
-        "{} dashboard --no-ghostty\n",
-        shell_quote(&exe.to_string_lossy())
-    );
-
-    let ghostty = GhosttyBackend::new();
-    let window = ghostty.create_window_default(&cwd)?;
-    ghostty.send_text(&window.terminal_id, &command)?;
+    let working_directory = format!("--working-directory={}", cwd.display());
+    let status = Command::new("open")
+        .args([
+            "-na",
+            "Ghostty",
+            "--args",
+            &working_directory,
+            "-e",
+            &exe.to_string_lossy(),
+            "dashboard",
+            "--no-ghostty",
+        ])
+        .status()?;
+    if !status.success() {
+        anyhow::bail!("Failed to launch Ghostty via open");
+    }
     Ok(())
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', r#"'"'"'"#))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn test_shell_quote_escapes_single_quotes() {
-        assert_eq!(shell_quote("/tmp/seance"), "'/tmp/seance'");
-        assert_eq!(shell_quote("/tmp/it's-seance"), r#"'/tmp/it'"'"'s-seance'"#);
-    }
 }
