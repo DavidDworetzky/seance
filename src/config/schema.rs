@@ -265,12 +265,14 @@ impl Default for SessionConfig {
 #[serde(default, deny_unknown_fields)]
 pub struct DashboardConfig {
     pub launch_in_ghostty: bool,
+    pub live_preview: bool,
 }
 
 impl Default for DashboardConfig {
     fn default() -> Self {
         Self {
             launch_in_ghostty: true,
+            live_preview: false,
         }
     }
 }
@@ -445,6 +447,13 @@ group:
         let yaml = "dev:\n  diagnostic_mode: true\n";
         let config: Config = serde_yml::from_str(yaml).unwrap();
         assert!(config.dev.diagnostic_mode);
+    }
+
+    #[test]
+    fn test_parse_dashboard_live_preview() {
+        let yaml = "dashboard:\n  live_preview: true\n";
+        let config: Config = serde_yml::from_str(yaml).unwrap();
+        assert!(config.dashboard.live_preview);
     }
 
     #[test]

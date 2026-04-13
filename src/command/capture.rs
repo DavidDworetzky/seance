@@ -1,4 +1,4 @@
-use crate::ghostty::{TerminalId, WindowTitle};
+use crate::ghostty::{WindowId, WindowTitle};
 use crate::session::store::SessionStore;
 use anyhow::Result;
 use clap::Args;
@@ -23,9 +23,9 @@ pub async fn run(args: CaptureArgs) -> Result<()> {
     let quadrant = store
         .find_quadrant(quadrant_str)
         .ok_or_else(|| anyhow::anyhow!("No active worktree in quadrant {}", quadrant_str))?;
-    let output = if let Some(pane_id) = quadrant.pane_id(agent_name) {
-        let pane_id = TerminalId::new(pane_id.to_string())?;
-        ghostty.capture_pane(&pane_id)?
+    let output = if let Some(window_id) = quadrant.window_id.as_deref() {
+        let window_id = WindowId::new(window_id.to_string())?;
+        ghostty.capture_window(&window_id)?
     } else {
         let window_title = WindowTitle::new(quadrant.window_title(agent_name))?;
         ghostty.capture_pane_title(&window_title)?

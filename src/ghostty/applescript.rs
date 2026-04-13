@@ -57,6 +57,25 @@ return winId & "," & paneId"#,
     )
 }
 
+pub fn list_window_ids() -> String {
+    r#"tell application "Ghostty"
+    set output to {}
+    repeat with win in windows
+        set end of output to (id of win as string)
+    end repeat
+    return output as string
+end tell"#
+        .to_string()
+}
+
+pub fn front_window_terminal() -> String {
+    r#"tell application "Ghostty"
+    set targetTerminal to focused terminal of selected tab of front window
+    return id of targetTerminal as string
+end tell"#
+        .to_string()
+}
+
 pub fn place_front_window(bounds: &WindowBounds) -> String {
     format!(
         r#"tell application "System Events"
@@ -248,6 +267,14 @@ end tell"#,
     )
 }
 
+pub fn capture_front_window() -> String {
+    r#"tell application "Ghostty"
+    set targetTerminal to focused terminal of selected tab of front window
+    return text of targetTerminal
+end tell"#
+        .to_string()
+}
+
 pub fn front_window_id() -> String {
     r#"tell application "Ghostty"
     return id of front window
@@ -391,6 +418,20 @@ mod tests {
     }
 
     #[test]
+    fn test_list_window_ids_script() {
+        let script = list_window_ids();
+        assert!(script.contains("repeat with win in windows"));
+        assert!(script.contains("id of win as string"));
+    }
+
+    #[test]
+    fn test_front_window_terminal_script() {
+        let script = front_window_terminal();
+        assert!(script.contains("focused terminal of selected tab of front window"));
+        assert!(script.contains("return id of targetTerminal as string"));
+    }
+
+    #[test]
     fn test_split_direction_script() {
         let script = split_direction("123", "right", None);
         assert!(script.contains(r#"(id as string) is "123""#));
@@ -479,6 +520,13 @@ mod tests {
         let script = capture_pane_title("seance-q1-claude");
         assert!(script.contains("name contains \"seance-q1-claude\""));
         assert!(script.contains("return text"));
+    }
+
+    #[test]
+    fn test_capture_front_window_script() {
+        let script = capture_front_window();
+        assert!(script.contains("focused terminal of selected tab of front window"));
+        assert!(script.contains("return text of targetTerminal"));
     }
 
     #[test]

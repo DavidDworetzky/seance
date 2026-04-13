@@ -105,6 +105,7 @@ merge_strategy: squash
 
 dashboard:
   launch_in_ghostty: false
+  live_preview: false
 
 dev:
   diagnostic_mode: false
