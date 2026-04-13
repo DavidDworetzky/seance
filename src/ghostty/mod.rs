@@ -1,8 +1,10 @@
 pub mod applescript;
 
 use anyhow::{Context, Result, ensure};
+use std::collections::HashSet;
 use std::fmt;
 use std::path::Path;
+use std::process::Command;
 use std::time::Duration;
 
 use crate::layout::quadrant::WindowBounds;
@@ -125,28 +127,34 @@ impl GhosttyBackend {
         bounds: &WindowBounds,
         initial_input: Option<&TerminalInput>,
     ) -> Result<GhosttyWindow> {
-        let script = applescript::create_window(cwd, initial_input.map(AsRef::as_ref));
-        let output = applescript::run_capture(&script).with_context(|| {
-            format!(
-                "creating Ghostty window in {} with bounds x={} y={} width={} height={}",
-                cwd.display(),
-                bounds.x,
-                bounds.y,
-                bounds.width,
-                bounds.height
-            )
-        })?;
+        let context = format!(
+            "creating Ghostty spirit window in {} with bounds x={} y={} width={} height={}",
+            cwd.display(),
+            bounds.x,
+            bounds.y,
+            bounds.width,
+            bounds.height
+        );
+        let before = self.window_ids().unwrap_or_default();
 
-        let window = parse_window(output).with_context(|| {
-            format!(
-                "creating Ghostty window in {} with bounds x={} y={} width={} height={}",
-                cwd.display(),
-                bounds.x,
-                bounds.y,
-                bounds.width,
-                bounds.height
-            )
-        })?;
+        Command::new("open")
+            .args([
+                "-na",
+                "Ghostty.app",
+                "--args",
+                &format!("--working-directory={}", cwd.display()),
+            ])
+            .status()
+            .with_context(|| context.clone())?;
+
+        let window = self
+            .wait_for_new_window(&before)
+            .with_context(|| context.clone())?;
+
+        if let Some(input) = initial_input {
+            self.send_text_to_focused_window(&window.window_id, input)
+                .with_context(|| context.clone())?;
+        }
 
         self.place_front_window(bounds);
 
@@ -155,6 +163,47 @@ impl GhosttyBackend {
 }
 
 impl GhosttyBackend {
+    fn window_ids(&self) -> Result<HashSet<WindowId>> {
+        let output = applescript::run_capture(&applescript::list_window_ids())?;
+        output
+            .split(',')
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(WindowId::new)
+            .collect()
+    }
+
+    fn wait_for_new_window(&self, before: &HashSet<WindowId>) -> Result<GhosttyWindow> {
+        for attempt in 1..=20 {
+            if let Ok(after) = self.window_ids() {
+                if let Some(window_id) = after.into_iter().find(|id| !before.contains(id)) {
+                    let terminal_id = self.front_window_terminal()?;
+                    crate::debug::log(
+                        "ghostty",
+                        &format!(
+                            "detected new spirit window attempt={} window_id={} terminal_id={}",
+                            attempt, window_id, terminal_id
+                        ),
+                    );
+                    return Ok(GhosttyWindow {
+                        window_id,
+                        terminal_id,
+                    });
+                }
+            }
+
+            std::thread::sleep(Duration::from_millis(100));
+        }
+
+        anyhow::bail!("Ghostty did not expose a new spirit window")
+    }
+
+    fn front_window_terminal(&self) -> Result<TerminalId> {
+        let output = applescript::run_capture(&applescript::front_window_terminal())
+            .with_context(|| "getting focused Ghostty terminal for the front window")?;
+        TerminalId::new(output)
+    }
+
     fn place_front_window(&self, bounds: &WindowBounds) {
         let script = applescript::place_front_window(bounds);
 
@@ -183,25 +232,6 @@ impl GhosttyBackend {
             }
         }
     }
-}
-
-fn parse_window(output: String) -> Result<GhosttyWindow> {
-    let mut parts = output.splitn(2, ',');
-    let window_id = parts
-        .next()
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("Ghostty did not return a window id"))?;
-    let terminal_id = parts
-        .next()
-        .map(str::trim)
-        .filter(|part| !part.is_empty())
-        .ok_or_else(|| anyhow::anyhow!("Ghostty did not return a terminal id"))?;
-
-    Ok(GhosttyWindow {
-        window_id: WindowId::new(window_id)?,
-        terminal_id: TerminalId::new(terminal_id)?,
-    })
 }
 
 impl GhosttyBackend {
@@ -266,6 +296,15 @@ impl GhosttyBackend {
         })
     }
 
+    pub fn send_text_to_window_id(
+        &self,
+        window_id: &WindowId,
+        text: &TerminalInput,
+    ) -> Result<()> {
+        self.focus_window(window_id)?;
+        self.send_text_to_focused_window(window_id, text)
+    }
+
     /// Send text to the first pane in a window matched by title.
     pub fn send_text_to_window(
         &self,
@@ -307,6 +346,13 @@ impl GhosttyBackend {
     pub fn capture_pane(&self, terminal_id: &TerminalId) -> Result<String> {
         let script = applescript::capture_pane(terminal_id.as_ref());
         applescript::run_capture(&script)
+    }
+
+    pub fn capture_window(&self, window_id: &WindowId) -> Result<String> {
+        self.focus_window(window_id)?;
+        let script = applescript::capture_front_window();
+        applescript::run_capture(&script)
+            .with_context(|| format!("capturing Ghostty terminal content for window {}", window_id))
     }
 
     /// Capture terminal output from the first pane in a window matched by title.

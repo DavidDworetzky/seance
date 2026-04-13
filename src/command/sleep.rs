@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Args;
 
-use crate::ghostty::{GhosttyBackend, TerminalId, WindowId, WindowTitle};
+use crate::ghostty::{GhosttyBackend, WindowId, WindowTitle};
 use crate::session::store::{SessionStatus, SessionStore};
 
 #[derive(Args)]
@@ -36,9 +36,9 @@ pub async fn run(args: SleepArgs) -> Result<()> {
         let mut agent_names: Vec<String> = q.agents.keys().cloned().collect();
         agent_names.sort();
         for agent_name in agent_names {
-            let capture = if let Some(pane_id) = q.pane_id(&agent_name) {
-                let pane_id = TerminalId::new(pane_id.to_string())?;
-                ghostty.capture_pane(&pane_id)
+            let capture = if let Some(window_id) = q.window_id.as_deref() {
+                let window_id = WindowId::new(window_id.to_string())?;
+                ghostty.capture_window(&window_id)
             } else {
                 let window_title = WindowTitle::new(q.window_title(&agent_name))?;
                 ghostty.capture_pane_title(&window_title)
