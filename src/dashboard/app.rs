@@ -137,15 +137,42 @@ impl App {
                 self.preview_agent = (self.preview_agent + 1) % agent_count;
             }
             KeyCode::Enter => {
-                // Jump to the quadrant's Ghostty window
-                if let Some(q) = self.quadrants.get(self.selected) {
+                // Jump to the quadrant's Ghostty window, opening it if needed
+                if let Some(q) = self.quadrants.get(self.selected).cloned() {
                     let ghostty = crate::ghostty::GhosttyBackend::new();
-                    let _ = match q.window_id.as_deref() {
-                        Some(window_id) => WindowId::new(window_id.to_string())
-                            .and_then(|window_id| ghostty.focus_window(&window_id)),
-                        None => WindowTitle::new(q.main_window_title())
-                            .and_then(|window_title| ghostty.focus_window_title(&window_title)),
-                    };
+                    let window_exists = q
+                        .window_id
+                        .as_deref()
+                        .and_then(|id| WindowId::new(id.to_string()).ok())
+                        .map(|id| ghostty.window_exists(&id))
+                        .unwrap_or(false);
+
+                    if window_exists {
+                        if let Some(window_id) = q.window_id.as_deref() {
+                            let _ = WindowId::new(window_id.to_string())
+                                .and_then(|id| ghostty.focus_window(&id));
+                        }
+                    } else {
+                        match crate::command::wake::wake_quadrant(&self.config, &ghostty, &q) {
+                            Ok(restored) => {
+                                if let Ok(mut store) = SessionStore::load() {
+                                    if let Some(session_id) = store.current_session_id() {
+                                        let _ = store.add_quadrant(&session_id, restored.clone());
+                                    }
+                                }
+                                if let Some(window_id) = restored.window_id.as_deref() {
+                                    let _ = WindowId::new(window_id.to_string())
+                                        .and_then(|id| ghostty.focus_window(&id));
+                                }
+                                self.status_message =
+                                    Some(format!("Opened Q{} · {}", q.quadrant, q.branch));
+                                self.refresh_now()?;
+                            }
+                            Err(e) => {
+                                self.status_message = Some(format!("Failed to open: {}", e));
+                            }
+                        }
+                    }
                 }
             }
             KeyCode::Char('i') => {
