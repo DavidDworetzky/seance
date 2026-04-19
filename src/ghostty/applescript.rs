@@ -292,6 +292,14 @@ end tell"#,
     )
 }
 
+pub fn capture_front_window() -> String {
+    r#"tell application "Ghostty"
+    set targetTerminal to focused terminal of selected tab of front window
+    return text of targetTerminal
+end tell"#
+        .to_string()
+}
+
 pub fn front_window_id() -> String {
     r#"tell application "Ghostty"
     return id of front window
@@ -514,6 +522,13 @@ mod tests {
         let script = capture_pane_title("seance-q1-claude");
         assert!(script.contains("name contains \"seance-q1-claude\""));
         assert!(script.contains("return text"));
+    }
+
+    #[test]
+    fn test_capture_front_window_script() {
+        let script = capture_front_window();
+        assert!(script.contains("focused terminal of selected tab of front window"));
+        assert!(script.contains("return text of targetTerminal"));
     }
 
     #[test]

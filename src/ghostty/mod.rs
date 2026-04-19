@@ -329,6 +329,11 @@ impl GhosttyBackend {
         })
     }
 
+    pub fn send_text_to_window_id(&self, window_id: &WindowId, text: &TerminalInput) -> Result<()> {
+        self.focus_window(window_id)?;
+        self.send_text_to_focused_window(window_id, text)
+    }
+
     /// Send text to the first pane in a window matched by title.
     pub fn send_text_to_window(
         &self,
@@ -370,6 +375,17 @@ impl GhosttyBackend {
     pub fn capture_pane(&self, terminal_id: &TerminalId) -> Result<String> {
         let script = applescript::capture_pane(terminal_id.as_ref());
         applescript::run_capture(&script)
+    }
+
+    pub fn capture_window(&self, window_id: &WindowId) -> Result<String> {
+        self.focus_window(window_id)?;
+        let script = applescript::capture_front_window();
+        applescript::run_capture(&script).with_context(|| {
+            format!(
+                "capturing Ghostty terminal content for window {}",
+                window_id
+            )
+        })
     }
 
     /// Capture terminal output from the first pane in a window matched by title.
