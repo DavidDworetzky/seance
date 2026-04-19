@@ -196,6 +196,89 @@ impl GhosttyBackend {
         request: &SpiritWindowRequest<'_>,
         initial_input: Option<&TerminalInput>,
     ) -> Result<GhosttyWindow> {
+        if let Some(input) = initial_input {
+            match self.open_spirit_window_with_command(request, input) {
+                Ok(window) => return Ok(window),
+                Err(err) => {
+                    crate::debug::log(
+                        "ghostty",
+                        &format!(
+                            "spirit window --command launch failed, falling back to injection error={:#}",
+                            err
+                        ),
+                    );
+                }
+            }
+        }
+
+        self.open_spirit_window_with_injection(request, initial_input)
+    }
+
+    fn open_spirit_window_with_command(
+        &self,
+        request: &SpiritWindowRequest<'_>,
+        input: &TerminalInput,
+    ) -> Result<GhosttyWindow> {
+        let known_windows = self.window_ids().unwrap_or_else(|err| {
+            crate::debug::log(
+                "ghostty",
+                &format!(
+                    "window snapshot unavailable before spirit launch error={:#}",
+                    err
+                ),
+            );
+            Vec::new()
+        });
+
+        let command = input.as_ref().trim_end_matches(['\n', '\r']);
+        crate::debug::log(
+            "ghostty",
+            &format!(
+                "creating Ghostty spirit window via --command cwd={} command={}",
+                request.cwd().display(),
+                command,
+            ),
+        );
+        let status = Command::new("open")
+            .args([
+                "-na",
+                "Ghostty.app",
+                "--args",
+                &format!("--command={}", command),
+                &format!("--working-directory={}", request.cwd().display()),
+            ])
+            .status()
+            .with_context(|| {
+                format!(
+                    "opening Ghostty spirit window in {}",
+                    request.cwd().display()
+                )
+            })?;
+        ensure!(
+            status.success(),
+            "opening Ghostty spirit window in {} failed",
+            request.cwd().display()
+        );
+
+        let window_id = self.wait_for_new_window(&known_windows).with_context(|| {
+            format!(
+                "opening Ghostty spirit window in {}",
+                request.cwd().display()
+            )
+        })?;
+        self.place_window(&window_id, request.surface().bounds());
+
+        Ok(GhosttyWindow {
+            window_id,
+            terminal_id: None,
+        })
+    }
+
+    fn open_spirit_window_with_injection(
+        &self,
+        request: &SpiritWindowRequest<'_>,
+        initial_input: Option<&TerminalInput>,
+    ) -> Result<GhosttyWindow> {
         let known_windows = self.window_ids().unwrap_or_else(|err| {
             crate::debug::log(
                 "ghostty",
