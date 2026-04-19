@@ -3,7 +3,7 @@ use clap::Args;
 
 use crate::agent;
 use crate::config::schema::Config;
-use crate::ghostty::{GhosttyBackend, TerminalInput};
+use crate::ghostty::{GhosttyBackend, SpiritWindowRequest, TerminalInput};
 use crate::session::store::{SessionStatus, SessionStore};
 
 #[derive(Args)]
@@ -62,8 +62,8 @@ pub async fn run(args: WakeArgs) -> Result<()> {
             .first()
             .and_then(|agent_name| config.agents.get(agent_name))
             .map(|ac| TerminalInput::new(format!("{}\n", agent::build_launch_command(ac, None))));
-        let window =
-            ghostty.create_window_with_input(&q.worktree_path, &bounds, first_input.as_ref())?;
+        let spirit_window = SpiritWindowRequest::new(&q.worktree_path, bounds.clone());
+        let window = ghostty.open_spirit_window(&spirit_window, first_input.as_ref())?;
 
         // Re-split for each agent in the group
         let window_id = window.window_id.clone();
@@ -77,10 +77,13 @@ pub async fn run(args: WakeArgs) -> Result<()> {
             });
             if i > 0 {
                 current_terminal =
-                    ghostty.split_right_with_input(&window_id, launch_input.as_ref())?;
+                    Some(ghostty.split_right_with_input(&window_id, launch_input.as_ref())?);
             }
-            if let Some(spirit) = restored.agents.get_mut(agent_name) {
-                spirit.pane_id = Some(current_terminal.to_string());
+            if let (Some(spirit), Some(terminal_id)) = (
+                restored.agents.get_mut(agent_name),
+                current_terminal.as_ref(),
+            ) {
+                spirit.pane_id = Some(terminal_id.to_string());
             }
             println!("  Restored {} in Q{}", agent_name, q.quadrant);
         }

@@ -13,6 +13,7 @@ use ratatui::prelude::*;
 use std::io::stdout;
 
 use crate::config::schema::Config;
+use crate::ghostty::{DashboardSurface, GhosttyBackend};
 use app::App;
 
 #[derive(Args, Debug, Clone, Default)]
@@ -48,27 +49,13 @@ pub async fn run_default() -> Result<()> {
 }
 
 pub async fn run_in_ghostty() -> Result<()> {
-    let exe = std::env::current_exe()?;
     let cwd = std::env::current_dir()?;
-
-    let debug_flag = if crate::debug::debug_ghostty() {
-        " --debug-ghostty"
-    } else {
-        ""
-    };
-    let command = format!("{}{} dashboard --inline", exe.display(), debug_flag);
-    let result = std::process::Command::new("open")
-        .args([
-            "-na",
-            "Ghostty.app",
-            "--args",
-            &format!("--command={}", command),
-            &format!("--working-directory={}", cwd.display()),
-        ])
-        .status();
+    let ghostty = GhosttyBackend::new();
+    let surface = DashboardSurface::new(&cwd);
+    let result = ghostty.launch_dashboard(&surface);
 
     match result {
-        Ok(status) if status.success() => Ok(()),
+        Ok(()) => Ok(()),
         _ => {
             // Ghostty not available, fall back to inline TUI
             run().await

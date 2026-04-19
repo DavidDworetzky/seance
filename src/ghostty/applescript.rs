@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use std::path::Path;
 use std::process::Command;
 
 use crate::layout::quadrant::WindowBounds;
@@ -36,49 +35,45 @@ pub fn run_capture_with_args(script: &str, args: &[&str]) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-pub fn create_window(cwd: &Path, initial_input: Option<&str>) -> String {
-    let escaped_cwd = escape_applescript(&cwd.display().to_string());
-    let initial_input = initial_input
-        .map(applescript_string_literal)
-        .map(|payload| format!("\n    set initial input of cfg to {}", payload))
-        .unwrap_or_default();
+pub fn window_ids() -> String {
+    r#"tell application "Ghostty"
+    set windowIds to {}
+    repeat with targetWin in windows
+        set end of windowIds to (id of targetWin as string)
+    end repeat
+end tell
+set AppleScript's text item delimiters to linefeed
+set joinedIds to windowIds as text
+set AppleScript's text item delimiters to ""
+return joinedIds"#
+        .to_string()
+}
+
+pub fn focused_terminal(window_id: &str) -> String {
+    let escaped_window_id = escape_applescript(window_id);
     format!(
         r#"tell application "Ghostty"
-    set cfg to new surface configuration
-    set initial working directory of cfg to "{}"
-{}
-    set win to new window with configuration cfg
-    set pane to focused terminal of selected tab of win
-    set winId to id of win as string
-    set paneId to id of pane as string
-end tell
-return winId & "," & paneId"#,
-        escaped_cwd, initial_input,
+    set targetWin to missing value
+    repeat with candidateWin in windows
+        if (id of candidateWin as string) is "{}" then
+            set targetWin to contents of candidateWin
+            exit repeat
+        end if
+    end repeat
+    if targetWin is missing value then error "Ghostty window not found: {}"
+    set targetTerminal to focused terminal of selected tab of targetWin
+    return id of targetTerminal as string
+end tell"#,
+        escaped_window_id, escaped_window_id,
     )
 }
 
-pub fn list_window_ids() -> String {
-    r#"tell application "Ghostty"
-    set output to {}
-    repeat with win in windows
-        set end of output to (id of win as string)
-    end repeat
-    return output as string
-end tell"#
-        .to_string()
-}
-
-pub fn front_window_terminal() -> String {
-    r#"tell application "Ghostty"
-    set targetTerminal to focused terminal of selected tab of front window
-    return id of targetTerminal as string
-end tell"#
-        .to_string()
-}
-
-pub fn place_front_window(bounds: &WindowBounds) -> String {
+pub fn place_window(_window_id: &str, bounds: &WindowBounds) -> String {
     format!(
-        r#"tell application "System Events"
+        r#"tell application "Ghostty"
+    activate
+end tell
+tell application "System Events"
     tell process "Ghostty"
         set position of front window to {{{}, {}}}
         set size of front window to {{{}, {}}}
@@ -119,11 +114,12 @@ end tell"#,
     )
 }
 
-pub fn split_focused_direction(
-    _window_id: &str,
+pub fn split_window_direction(
+    window_id: &str,
     direction: &str,
     initial_input: Option<&str>,
 ) -> String {
+    let escaped_window_id = escape_applescript(window_id);
     let setup = initial_input
         .map(applescript_string_literal)
         .map(|payload| {
@@ -144,12 +140,19 @@ pub fn split_focused_direction(
     format!(
         r#"tell application "Ghostty"
 {}
-    set targetWin to front window
+    set targetWin to missing value
+    repeat with candidateWin in windows
+        if (id of candidateWin as string) is "{}" then
+            set targetWin to contents of candidateWin
+            exit repeat
+        end if
+    end repeat
+    if targetWin is missing value then error "Ghostty window not found: {}"
     set targetTerminal to focused terminal of selected tab of targetWin
     set newTerminal to {}
     return id of newTerminal as string
 end tell"#,
-        setup, split_expr,
+        setup, escaped_window_id, escaped_window_id, split_expr,
     )
 }
 
@@ -166,15 +169,23 @@ end tell"#,
     )
 }
 
-pub fn send_text_to_focused_window(_window_id: &str, text: &str) -> String {
+pub fn send_text_to_focused_window(window_id: &str, text: &str) -> String {
+    let escaped_window_id = escape_applescript(window_id);
     let payload = applescript_string_literal(text);
     format!(
         r#"tell application "Ghostty"
-    set targetWin to front window
-    set targetTerminal to focused terminal of selected tab of targetWin
+    set targetWin to missing value
+    repeat with candidateWin in windows
+        if (id of candidateWin as string) is "{}" then
+            set targetWin to contents of candidateWin
+            exit repeat
+        end if
+    end repeat
+    if targetWin is missing value then error "Ghostty window not found: {}"
+    set targetTerminal to terminal 1 of selected tab of targetWin
     input text {} to targetTerminal
 end tell"#,
-        payload,
+        escaped_window_id, escaped_window_id, payload,
     )
 }
 
@@ -196,10 +207,17 @@ pub fn focus_window(window_id: &str) -> String {
     format!(
         r#"tell application "Ghostty"
     activate
-    set targetWin to first window whose (id as string) is "{}"
+    set targetWin to missing value
+    repeat with candidateWin in windows
+        if (id of candidateWin as string) is "{}" then
+            set targetWin to contents of candidateWin
+            exit repeat
+        end if
+    end repeat
+    if targetWin is missing value then error "Ghostty window not found: {}"
     set index of targetWin to 1
 end tell"#,
-        escaped_window_id,
+        escaped_window_id, escaped_window_id,
     )
 }
 
@@ -221,10 +239,17 @@ pub fn close_window(window_id: &str) -> String {
     let escaped_window_id = escape_applescript(window_id);
     format!(
         r#"tell application "Ghostty"
-    set targetWin to first window whose (id as string) is "{}"
+    set targetWin to missing value
+    repeat with candidateWin in windows
+        if (id of candidateWin as string) is "{}" then
+            set targetWin to contents of candidateWin
+            exit repeat
+        end if
+    end repeat
+    if targetWin is missing value then error "Ghostty window not found: {}"
     close targetWin
 end tell"#,
-        escaped_window_id,
+        escaped_window_id, escaped_window_id,
     )
 }
 
@@ -376,59 +401,36 @@ fn numbered_script(script: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::quadrant::WindowBounds;
-    use std::path::Path;
 
     #[test]
-    fn test_create_window_script() {
-        let script = create_window(Path::new("/tmp/worktree"), None);
-        assert!(script.contains("Ghostty"));
-        assert!(script.contains("set cfg to new surface configuration"));
-        assert!(script.contains("set win to new window with configuration cfg"));
-        assert!(script.contains("/tmp/worktree"));
-        assert!(script.contains("focused terminal of selected tab of win"));
-        assert!(script.contains("return winId & \",\" & paneId"));
+    fn test_window_ids_script() {
+        let script = window_ids();
+        assert!(script.contains("repeat with targetWin in windows"));
+        assert!(script.contains("id of targetWin as string"));
+        assert!(script.contains("text item delimiters to linefeed"));
     }
 
     #[test]
-    fn test_create_window_escapes_quotes_in_path() {
-        let script = create_window(Path::new("/tmp/with\"quote"), None);
-        assert!(script.contains(r#"set initial working directory of cfg to "/tmp/with\"quote""#));
+    fn test_focused_terminal_script() {
+        let script = focused_terminal("window-1");
+        assert!(script.contains(r#"if (id of candidateWin as string) is "window-1" then"#));
+        assert!(script.contains("focused terminal of selected tab of targetWin"));
     }
 
     #[test]
-    fn test_create_window_with_initial_input() {
-        let script = create_window(Path::new("/tmp/worktree"), Some("claude --model opus\n"));
-        assert!(script.contains("set initial input of cfg"));
-        assert!(script.contains(r#""claude --model opus" & return & """#));
-    }
-
-    #[test]
-    fn test_place_front_window_script() {
-        let bounds = WindowBounds {
-            x: 0,
-            y: 0,
-            width: 960,
-            height: 540,
-        };
-        let script = place_front_window(&bounds);
-        assert!(script.contains("System Events"));
+    fn test_place_window_script() {
+        let script = place_window(
+            "window-1",
+            &WindowBounds {
+                x: 0,
+                y: 0,
+                width: 960,
+                height: 540,
+            },
+        );
+        assert!(script.contains(r#"tell application "Ghostty""#));
         assert!(script.contains("set position of front window to {0, 0}"));
         assert!(script.contains("set size of front window to {960, 540}"));
-    }
-
-    #[test]
-    fn test_list_window_ids_script() {
-        let script = list_window_ids();
-        assert!(script.contains("repeat with win in windows"));
-        assert!(script.contains("id of win as string"));
-    }
-
-    #[test]
-    fn test_front_window_terminal_script() {
-        let script = front_window_terminal();
-        assert!(script.contains("focused terminal of selected tab of front window"));
-        assert!(script.contains("return id of targetTerminal as string"));
     }
 
     #[test]
@@ -450,9 +452,9 @@ mod tests {
     }
 
     #[test]
-    fn test_split_focused_direction_with_initial_input_script() {
-        let script = split_focused_direction("window-1", "right", Some("codex\n"));
-        assert!(script.contains("set targetWin to front window"));
+    fn test_split_window_direction_targets_specific_window() {
+        let script = split_window_direction("window-1", "right", Some("codex\n"));
+        assert!(script.contains(r#"if (id of candidateWin as string) is "window-1" then"#));
         assert!(script.contains("focused terminal of selected tab of targetWin"));
         assert!(script.contains("with configuration cfg"));
     }
@@ -468,7 +470,7 @@ mod tests {
     fn test_focus_window_script() {
         let script = focus_window("456");
         assert!(script.contains("activate"));
-        assert!(script.contains(r#"(id as string) is "456""#));
+        assert!(script.contains(r#"if (id of candidateWin as string) is "456" then"#));
         assert!(script.contains("set index"));
     }
 
@@ -483,7 +485,7 @@ mod tests {
     fn test_close_window_script() {
         let script = close_window("456");
         assert!(script.contains("close targetWin"));
-        assert!(script.contains(r#"(id as string) is "456""#));
+        assert!(script.contains(r#"if (id of candidateWin as string) is "456" then"#));
     }
 
     #[test]
@@ -496,8 +498,8 @@ mod tests {
     #[test]
     fn test_send_text_to_focused_window_script() {
         let script = send_text_to_focused_window("window-1", "pwd\n");
-        assert!(script.contains("set targetWin to front window"));
-        assert!(script.contains("focused terminal of selected tab of targetWin"));
+        assert!(script.contains(r#"if (id of candidateWin as string) is "window-1" then"#));
+        assert!(script.contains("terminal 1 of selected tab of targetWin"));
         assert!(script.contains(r#"input text "pwd" & return & "" to targetTerminal"#));
     }
 

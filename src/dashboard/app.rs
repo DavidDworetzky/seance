@@ -66,12 +66,12 @@ impl App {
                         if let Some(agent_name) = agents.get(self.preview_agent) {
                             let ghostty = crate::ghostty::GhosttyBackend::new();
                             let _ = match q.window_id.as_deref() {
-                                Some(window_id) => WindowId::new(window_id.to_string()).and_then(
-                                    |window_id| {
+                                Some(window_id) => {
+                                    WindowId::new(window_id.to_string()).and_then(|window_id| {
                                         let text = TerminalInput::new(c.to_string());
                                         ghostty.send_text_to_window_id(&window_id, &text)
-                                    },
-                                ),
+                                    })
+                                }
                                 None => WindowTitle::new(q.window_title(agent_name)).and_then(
                                     |window_title| {
                                         let text = TerminalInput::new(c.to_string());
@@ -88,12 +88,12 @@ impl App {
                         if let Some(agent_name) = agents.get(self.preview_agent) {
                             let ghostty = crate::ghostty::GhosttyBackend::new();
                             let _ = match q.window_id.as_deref() {
-                                Some(window_id) => WindowId::new(window_id.to_string()).and_then(
-                                    |window_id| {
+                                Some(window_id) => {
+                                    WindowId::new(window_id.to_string()).and_then(|window_id| {
                                         let text = TerminalInput::new("\n");
                                         ghostty.send_text_to_window_id(&window_id, &text)
-                                    },
-                                ),
+                                    })
+                                }
                                 None => WindowTitle::new(q.window_title(agent_name)).and_then(
                                     |window_title| {
                                         let text = TerminalInput::new("\n");

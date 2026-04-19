@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::agent;
 use crate::config::schema::Config;
-use crate::ghostty::{GhosttyBackend, TerminalInput};
+use crate::ghostty::{GhosttyBackend, SpiritWindowRequest, TerminalInput};
 use crate::git::worktree;
 use crate::layout::quadrant::QuadrantAssigner;
 use crate::session::store::{self, SessionStore};
@@ -269,14 +269,15 @@ fn create_quadrant(
             ))
         });
 
+    let spirit_window = SpiritWindowRequest::new(&wt_path, bounds.clone());
     let window = ghostty
-        .create_window_with_input(&wt_path, &bounds, first_input.as_ref())
+        .open_spirit_window(&spirit_window, first_input.as_ref())
         .with_context(|| format!("add flow step=create_window {}", target))?;
     let window_id = window.window_id.clone();
     crate::debug::log(
         "add",
         &format!(
-            "window ready window_id={} terminal_id={} {}",
+            "window ready window_id={} terminal_id={:?} {}",
             window.window_id, window.terminal_id, target
         ),
     );
@@ -293,15 +294,17 @@ fn create_quadrant(
         });
 
         if i > 0 {
-            current_terminal = ghostty
-                .split_right_with_input(&window_id, launch_input.as_ref())
-                .with_context(|| {
-                    format!("add flow step=split_right agent={} {}", agent_name, target)
-                })?;
+            current_terminal = Some(
+                ghostty
+                    .split_right_with_input(&window_id, launch_input.as_ref())
+                    .with_context(|| {
+                        format!("add flow step=split_right agent={} {}", agent_name, target)
+                    })?,
+            );
             crate::debug::log(
                 "add",
                 &format!(
-                    "split_right agent={} terminal={} {}",
+                    "split_right agent={} terminal={:?} {}",
                     agent_name, current_terminal, target
                 ),
             );
@@ -311,12 +314,14 @@ fn create_quadrant(
             crate::debug::log(
                 "add",
                 &format!(
-                    "launch_agent agent={} terminal={} command={:?} {}",
+                    "launch_agent agent={} terminal={:?} command={:?} {}",
                     agent_name, current_terminal, cmd, target
                 ),
             );
         }
-        pane_ids.push((agent_name.clone(), current_terminal.clone()));
+        if let Some(terminal_id) = current_terminal.clone() {
+            pane_ids.push((agent_name.clone(), terminal_id));
+        }
         println!("  Started {} in Q{}", agent_name, quadrant);
     }
 
