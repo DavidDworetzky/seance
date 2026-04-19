@@ -487,6 +487,13 @@ impl GhosttyBackend {
         parse_window_ids(&output)
     }
 
+    /// Check if a window with the given id exists.
+    pub fn window_exists(&self, window_id: &WindowId) -> bool {
+        self.window_ids()
+            .map(|ids| ids.iter().any(|id| id.as_ref() == window_id.as_ref()))
+            .unwrap_or(false)
+    }
+
     fn wait_for_new_window(&self, known_windows: &[WindowId]) -> Result<WindowId> {
         let known: HashSet<&str> = known_windows.iter().map(AsRef::as_ref).collect();
         for attempt in 1..=20 {

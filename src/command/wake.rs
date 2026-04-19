@@ -103,3 +103,58 @@ pub async fn run(args: WakeArgs) -> Result<()> {
     println!("Session {} restored.", session_id);
     Ok(())
 }
+
+/// Wake a single quadrant by opening its spirit window and restoring agents.
+/// Returns the updated QuadrantState with new window/terminal IDs.
+pub fn wake_quadrant(
+    config: &Config,
+    ghostty: &GhosttyBackend,
+    q: &crate::session::store::QuadrantState,
+) -> Result<crate::session::store::QuadrantState> {
+    if !q.worktree_path.exists() {
+        anyhow::bail!(
+            "Worktree {} no longer exists",
+            q.worktree_path.display()
+        );
+    }
+
+    let bounds = crate::layout::quadrant::compute_bounds(q.quadrant, q.monitor, config);
+    let agents = q.ordered_agent_names(&config.group);
+    let first_input = agents
+        .first()
+        .and_then(|agent_name| config.agents.get(agent_name))
+        .map(|ac| TerminalInput::new(format!("{}\n", agent::build_launch_command(ac, None))));
+    let spirit_window =
+        crate::ghostty::SpiritWindowRequest::new(&q.worktree_path, bounds.clone());
+    let window = ghostty.open_spirit_window(&spirit_window, first_input.as_ref())?;
+
+    let window_id = window.window_id.clone();
+    let mut current_terminal = window.terminal_id.clone();
+    let mut restored = q.clone();
+    restored.window_id = Some(window.window_id.to_string());
+
+    for (i, agent_name) in agents.iter().enumerate() {
+        let launch_input = config.agents.get(agent_name).map(|ac| {
+            TerminalInput::new(format!("{}\n", agent::build_launch_command(ac, None)))
+        });
+        if i > 0 {
+            current_terminal =
+                Some(ghostty.split_right_with_input(&window_id, launch_input.as_ref())?);
+        }
+        if let (Some(spirit), Some(terminal_id)) =
+            (restored.agents.get_mut(agent_name), current_terminal.as_ref())
+        {
+            spirit.pane_id = Some(terminal_id.to_string());
+        }
+    }
+
+    if agents
+        .last()
+        .and_then(|last_agent| restored.pane_id(last_agent))
+        .is_some()
+    {
+        let _ = ghostty.split_down(&window_id)?;
+    }
+
+    Ok(restored)
+}
