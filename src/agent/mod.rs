@@ -59,6 +59,7 @@ pub fn generate_branch_name(config: &Config, prompt: &str) -> Result<String> {
     let stdout = String::from_utf8(output.stdout)?;
     let raw = stdout
         .lines()
+        .rev()
         .find(|line| !line.trim().is_empty())
         .unwrap_or("seance");
 
