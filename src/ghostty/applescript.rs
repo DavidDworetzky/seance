@@ -87,11 +87,12 @@ end tell"#,
 pub fn split_direction(terminal_id: &str, direction: &str, initial_input: Option<&str>) -> String {
     let escaped_terminal_id = escape_applescript(terminal_id);
     let setup = initial_input
-        .map(applescript_string_literal)
-        .map(|payload| {
+        .map(|input| {
+            let cmd = input.trim_end_matches(['\n', '\r']);
+            let cmd_literal = applescript_string_literal(cmd);
             format!(
-                "    set cfg to new surface configuration\n    set initial input of cfg to {}\n",
-                payload
+                "    set cfg to new surface configuration\n    set command of cfg to {}\n",
+                cmd_literal
             )
         })
         .unwrap_or_default();
@@ -121,11 +122,12 @@ pub fn split_window_direction(
 ) -> String {
     let escaped_window_id = escape_applescript(window_id);
     let setup = initial_input
-        .map(applescript_string_literal)
-        .map(|payload| {
+        .map(|input| {
+            let cmd = input.trim_end_matches(['\n', '\r']);
+            let cmd_literal = applescript_string_literal(cmd);
             format!(
-                "    set cfg to new surface configuration\n    set initial input of cfg to {}\n",
-                payload
+                "    set cfg to new surface configuration\n    set command of cfg to {}\n",
+                cmd_literal
             )
         })
         .unwrap_or_default();
@@ -444,13 +446,12 @@ mod tests {
     }
 
     #[test]
-    fn test_split_direction_with_initial_input_script() {
+    fn test_split_direction_with_command_script() {
         let script = split_direction("123", "right", Some("codex\n"));
-        let expected = r#"set initial input of cfg to "codex" & return & """#;
         assert!(script.contains("set cfg to new surface configuration"));
         assert!(script.contains("with configuration cfg"));
-        assert!(script.contains(expected));
-        assert!(!script.contains("set command of cfg"));
+        assert!(script.contains(r#"set command of cfg to "codex""#));
+        assert!(!script.contains("set initial input of cfg"));
     }
 
     #[test]
@@ -462,15 +463,32 @@ mod tests {
     }
 
     #[test]
-    fn test_split_window_direction_preserves_shell_input() {
+    fn test_split_window_direction_uses_command_not_initial_input() {
         let script = split_window_direction(
             "win-1",
             "right",
             Some("codex --prompt \"$(cat /tmp/prompt.md)\"\n"),
         );
-        let expected = r#"set initial input of cfg to "codex --prompt \"$(cat /tmp/prompt.md)\"" & return & """#;
-        assert!(script.contains(expected));
-        assert!(!script.contains("set command of cfg"));
+        assert!(
+            script.contains(r#"set command of cfg to "codex --prompt \"$(cat /tmp/prompt.md)\"""#)
+        );
+        assert!(!script.contains("set initial input of cfg"));
+    }
+
+    #[test]
+    fn test_split_window_direction_does_not_inject_codex_into_cloned_claude_surface() {
+        let script = split_window_direction(
+            "win-1",
+            "right",
+            Some("codex -m gpt-5.4 -c model_reasoning_effort=\"high\"\n"),
+        );
+
+        assert!(script.contains(
+            r#"set command of cfg to "codex -m gpt-5.4 -c model_reasoning_effort=\"high\"""#
+        ));
+        assert!(script.contains("split targetTerminal direction right with configuration cfg"));
+        assert!(!script.contains("set initial input of cfg"));
+        assert!(!script.contains("input text"));
     }
 
     #[test]
