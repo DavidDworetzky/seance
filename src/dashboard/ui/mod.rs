@@ -1,7 +1,7 @@
 use ratatui::prelude::*;
 use ratatui::widgets::*;
 
-use super::app::App;
+use super::{app::App, theme::default as theme};
 
 const ASCII_BANNER: &str = r#"
        .-.    .--.    .-.
@@ -45,7 +45,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
     ))
     .style(
         Style::default()
-            .fg(Color::Cyan)
+            .fg(theme::HEADER_TEXT)
             .add_modifier(Modifier::BOLD),
     )
     .block(Block::default().borders(Borders::BOTTOM));
@@ -56,7 +56,7 @@ fn render_header(frame: &mut Frame, area: Rect, app: &App) {
 fn render_spirit_table(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.quadrants.is_empty() {
         let empty = Paragraph::new(ASCII_BANNER)
-            .style(Style::default().fg(Color::DarkGray))
+            .style(Style::default().fg(theme::MUTED_TEXT))
             .alignment(Alignment::Center)
             .block(Block::default().borders(Borders::ALL).title(" spirits "));
         frame.render_widget(empty, area);
@@ -68,7 +68,7 @@ fn render_spirit_table(frame: &mut Frame, area: Rect, app: &mut App) {
         .map(|h| {
             Cell::from(*h).style(
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme::TABLE_HEADER_TEXT)
                     .add_modifier(Modifier::BOLD),
             )
         });
@@ -81,10 +81,10 @@ fn render_spirit_table(frame: &mut Frame, area: Rect, app: &mut App) {
         .map(|(i, q)| {
             let style = if i == app.selected {
                 Style::default()
-                    .fg(Color::White)
+                    .fg(theme::TABLE_SELECTED_ROW_TEXT)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::Gray)
+                Style::default().fg(theme::TABLE_ROW_TEXT)
             };
 
             let agent_statuses: Vec<String> = app
@@ -157,13 +157,13 @@ fn render_preview(frame: &mut Frame, area: Rect, app: &App) {
     };
 
     let preview = Paragraph::new(format!("{}{}", mode_indicator, content))
-        .style(Style::default().fg(Color::White))
+        .style(Style::default().fg(theme::PREVIEW_TEXT))
         .block(
             Block::default()
                 .borders(Borders::ALL)
                 .title(title)
                 .border_style(if app.input_mode {
-                    Style::default().fg(Color::Green)
+                    Style::default().fg(theme::INPUT_MODE_BORDER)
                 } else {
                     Style::default()
                 }),
@@ -187,7 +187,7 @@ fn render_status_bar(frame: &mut Frame, area: Rect, app: &App) {
         text.push_str(message);
     }
 
-    let bar = Paragraph::new(text).style(Style::default().fg(Color::DarkGray));
+    let bar = Paragraph::new(text).style(Style::default().fg(theme::MUTED_TEXT));
 
     frame.render_widget(bar, area);
 }
@@ -226,18 +226,10 @@ fn render_repo_picker(frame: &mut Frame, app: &App) {
         .enumerate()
         .skip(start)
         .take(end.saturating_sub(start))
-        .enumerate()
-        .map(|(offset, (_index, repo))| {
-            let absolute = start + offset;
-            let marker = if absolute == picker.selected {
-                "▸"
-            } else {
-                " "
-            };
+        .map(|(_index, repo)| {
             let config = if repo.has_config { "cfg" } else { "default" };
             ListItem::new(format!(
-                "{} {}  [{} | {}]",
-                marker,
+                "{}  [{} | {}]",
                 repo.path.display(),
                 repo.project_type,
                 config
@@ -245,18 +237,8 @@ fn render_repo_picker(frame: &mut Frame, app: &App) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title(" add worktree "),
-        )
-        .highlight_style(
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        );
-    frame.render_widget(list, rows[0]);
+    let selected = visible_modal_selection(picker.selected, start, end);
+    render_modal_list(frame, rows[0], " add worktree ", items, selected);
 
     let detail = picker
         .error
@@ -266,12 +248,44 @@ fn render_repo_picker(frame: &mut Frame, app: &App) {
 
     let footer = Paragraph::new(detail)
         .style(Style::default().fg(if picker.error.is_some() {
-            Color::Red
+            theme::ERROR_TEXT
         } else {
-            Color::DarkGray
+            theme::MUTED_TEXT
         }))
         .block(Block::default().borders(Borders::LEFT | Borders::RIGHT | Borders::BOTTOM));
     frame.render_widget(footer, rows[1]);
+}
+
+fn render_modal_list(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    items: Vec<ListItem<'_>>,
+    selected: Option<usize>,
+) {
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title))
+        .highlight_symbol("▸ ")
+        .highlight_style(modal_selection_style());
+    let mut state = modal_list_state(selected);
+
+    frame.render_stateful_widget(list, area, &mut state);
+}
+
+fn visible_modal_selection(selected: usize, start: usize, end: usize) -> Option<usize> {
+    (start..end).contains(&selected).then(|| selected - start)
+}
+
+fn modal_list_state(selected: Option<usize>) -> ListState {
+    let mut state = ListState::default();
+    state.select(selected);
+    state
+}
+
+fn modal_selection_style() -> Style {
+    Style::default()
+        .fg(theme::REPO_PICKER_SELECTED_TEXT)
+        .add_modifier(Modifier::BOLD)
 }
 
 fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
@@ -292,4 +306,30 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
             Constraint::Fill(1),
         ])
         .split(vertical[1])[1]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modal_visible_selection_is_relative_to_visible_rows() {
+        assert_eq!(visible_modal_selection(7, 5, 10), Some(2));
+        assert_eq!(visible_modal_selection(4, 5, 10), None);
+        assert_eq!(visible_modal_selection(10, 5, 10), None);
+    }
+
+    #[test]
+    fn modal_list_state_tracks_selected_row_for_highlighting() {
+        let state = modal_list_state(Some(2));
+        assert_eq!(state.selected(), Some(2));
+    }
+
+    #[test]
+    fn modal_selection_style_uses_lime_picker_color() {
+        assert_eq!(
+            modal_selection_style().fg,
+            Some(theme::REPO_PICKER_SELECTED_TEXT)
+        );
+    }
 }
