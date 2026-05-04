@@ -340,7 +340,8 @@ impl App {
 
     fn refresh_now(&mut self) -> Result<()> {
         self.last_refresh = std::time::Instant::now();
-        let store = SessionStore::load()?;
+        let mut store = SessionStore::load()?;
+        store.sync_generated_branch_renames()?;
         self.quadrants = store.active_quadrants();
         if self.selected >= self.quadrants.len() && !self.quadrants.is_empty() {
             self.selected = self.quadrants.len() - 1;

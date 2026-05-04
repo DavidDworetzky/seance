@@ -11,6 +11,7 @@ pub struct ListArgs {
 pub async fn run(args: ListArgs) -> Result<()> {
     let config = crate::config::schema::Config::load(None)?;
     let mut store = crate::session::store::SessionStore::load()?;
+    store.sync_generated_branch_renames()?;
 
     // Optionally fetch PR status
     if args.pr {

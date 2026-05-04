@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use super::spirit::{SpiritState, SpiritStatus};
 
@@ -268,6 +268,54 @@ impl SessionStore {
             .filter(|s| s.status == SessionStatus::Active)
             .flat_map(|s| s.quadrants.clone())
             .collect()
+    }
+
+    /// Sync Seance-generated placeholder branches after the user renames them in-place.
+    pub fn sync_generated_branch_renames(&mut self) -> Result<bool> {
+        let mut changed = false;
+
+        for session in &mut self.sessions {
+            let repo_path = Path::new(&session.repo_path);
+            let config = match crate::config::schema::Config::load(Some(repo_path)) {
+                Ok(config) => config,
+                Err(_) => continue,
+            };
+
+            for quadrant in &mut session.quadrants {
+                if !crate::git::branch::is_seance_generated(&quadrant.branch) {
+                    continue;
+                }
+
+                let current_branch =
+                    match crate::git::branch::current_in_repo(&quadrant.worktree_path) {
+                        Ok(branch) => branch,
+                        Err(_) => continue,
+                    };
+
+                if current_branch == quadrant.branch
+                    || crate::git::branch::is_seance_generated(&current_branch)
+                {
+                    continue;
+                }
+
+                let new_path =
+                    crate::git::worktree::path_for_in_repo(&config, repo_path, &current_branch)?;
+                crate::git::worktree::move_path(&quadrant.worktree_path, &new_path)?;
+
+                if session.name == quadrant.branch || session.name == "seance" {
+                    session.name = current_branch.clone();
+                }
+                quadrant.branch = current_branch;
+                quadrant.worktree_path = new_path;
+                changed = true;
+            }
+        }
+
+        if changed {
+            self.save()?;
+        }
+
+        Ok(changed)
     }
 
     /// Get occupied quadrant numbers on a given monitor.

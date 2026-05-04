@@ -6,7 +6,8 @@ pub struct StatusArgs;
 
 pub async fn run(_args: StatusArgs) -> Result<()> {
     let config = crate::config::schema::Config::load(None)?;
-    let store = crate::session::store::SessionStore::load()?;
+    let mut store = crate::session::store::SessionStore::load()?;
+    store.sync_generated_branch_renames()?;
     let quadrants = store.active_quadrants();
 
     if quadrants.is_empty() {
