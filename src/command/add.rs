@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use clap::Args;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::agent;
 use crate::config::schema::Config;
@@ -66,16 +66,16 @@ pub struct CreatedQuadrant {
 }
 
 pub fn run_in_repo(args: AddArgs, repo_path: &Path) -> Result<Vec<CreatedQuadrant>> {
-    let config = Config::load(Some(repo_path))?;
+    let requested_repo_path = crate::git::repo_root(repo_path)?;
+    let effective_repo_path = effective_add_repo_path(&requested_repo_path)?;
+    let config = Config::load(Some(&effective_repo_path))?;
     let mut store = SessionStore::load()?;
     let ghostty = GhosttyBackend::new();
     let assigner = QuadrantAssigner::new(&store, config.quadrants_per_monitor);
     let prompt_content =
         crate::agent::prompt::resolve_prompt(args.prompt.as_deref(), args.prompt_file.as_deref())?;
 
-    let repo_path = crate::git::repo_root(repo_path)?
-        .to_string_lossy()
-        .to_string();
+    let repo_path = effective_repo_path.to_string_lossy().to_string();
     let auto_name_requested = args.auto_name || config.auto_name.enabled;
     let branch_seed = match args.branch.clone() {
         Some(branch) => Some(branch),
@@ -150,19 +150,78 @@ pub fn run_in_repo(args: AddArgs, repo_path: &Path) -> Result<Vec<CreatedQuadran
     Ok(created)
 }
 
+fn effective_add_repo_path(repo_path: &Path) -> Result<PathBuf> {
+    let current_branch = crate::git::branch::current_in_repo(repo_path)?;
+    if crate::git::branch::is_seance_generated(&current_branch) {
+        return crate::git::primary_repo_root(repo_path);
+    }
+
+    Ok(repo_path.to_path_buf())
+}
+
 fn unique_default_branch(repo_path: &Path, quadrant: u8) -> String {
-    let base = format!("seance-{}", quadrant);
+    let date = chrono::Local::now().format("%Y%m%d").to_string();
+    let timestamp = chrono::Local::now().format("%Y%m%d%H%M%S").to_string();
+    unique_default_branch_for(repo_path, quadrant, &date, &timestamp)
+}
+
+fn unique_default_branch_for(
+    repo_path: &Path,
+    quadrant: u8,
+    date: &str,
+    timestamp: &str,
+) -> String {
+    let repo_slug = repo_slug(repo_path);
+    let base = format!("seance/{}/{}-q{}", date, repo_slug, quadrant);
     if !branch_exists(repo_path, &base) {
         return base;
     }
 
     let mut suffix = 2;
+    let dated = format!("{}-{}", base, timestamp);
+    if !branch_exists(repo_path, &dated) {
+        return dated;
+    }
+
     loop {
-        let candidate = format!("{}-{}", base, suffix);
+        let candidate = format!("{}-{}", dated, suffix);
         if !branch_exists(repo_path, &candidate) {
             return candidate;
         }
         suffix += 1;
+    }
+}
+
+fn repo_slug(repo_path: &Path) -> String {
+    let name = repo_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("project");
+    slugify(name)
+}
+
+fn slugify(value: &str) -> String {
+    let mut slug = String::new();
+    let mut last_was_dash = false;
+
+    for c in value.chars().flat_map(|c| c.to_lowercase()) {
+        if c.is_ascii_alphanumeric() {
+            slug.push(c);
+            last_was_dash = false;
+        } else if !last_was_dash && !slug.is_empty() {
+            slug.push('-');
+            last_was_dash = true;
+        }
+    }
+
+    while slug.ends_with('-') {
+        slug.pop();
+    }
+
+    if slug.is_empty() {
+        "project".to_string()
+    } else {
+        slug
     }
 }
 
@@ -397,21 +456,71 @@ mod tests {
     fn test_unique_default_branch_uses_base_name_when_available() {
         let dir = tempfile::tempdir().unwrap();
         init_git_repo(dir.path());
-        assert_eq!(unique_default_branch(dir.path(), 1), "seance-1");
+        assert_eq!(
+            unique_default_branch_for(dir.path(), 1, "20260504", "20260504123456"),
+            format!("seance/20260504/{}-q1", repo_slug(dir.path()))
+        );
     }
 
     #[test]
-    fn test_unique_default_branch_increments_when_branch_exists() {
+    fn test_unique_default_branch_appends_timestamp_when_branch_exists() {
         let dir = tempfile::tempdir().unwrap();
         init_git_repo(dir.path());
+        let base = unique_default_branch_for(dir.path(), 1, "20260504", "20260504123456");
 
         let status = std::process::Command::new("git")
-            .args(["branch", "seance-1"])
+            .args(["branch", &base])
             .current_dir(dir.path())
             .status()
             .unwrap();
         assert!(status.success());
 
-        assert_eq!(unique_default_branch(dir.path(), 1), "seance-1-2");
+        assert_eq!(
+            unique_default_branch_for(dir.path(), 1, "20260504", "20260504123456"),
+            format!("{}-20260504123456", base)
+        );
+    }
+
+    #[test]
+    fn test_slugify_normalizes_feature_names() {
+        assert_eq!(slugify("Fix CLI add colors"), "fix-cli-add-colors");
+        assert_eq!(slugify("  !!!  "), "project");
+    }
+
+    #[test]
+    fn test_effective_add_repo_path_uses_primary_repo_for_generated_worktree() {
+        let dir = tempfile::tempdir().unwrap();
+        init_git_repo(dir.path());
+        let worktree_path = dir.path().parent().unwrap().join(format!(
+            "{}-generated",
+            dir.path().file_name().unwrap().to_string_lossy()
+        ));
+
+        let status = std::process::Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                &worktree_path.to_string_lossy(),
+                "-b",
+                "seance-1",
+                "HEAD",
+            ])
+            .current_dir(dir.path())
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let effective = effective_add_repo_path(&worktree_path).unwrap();
+        assert_eq!(effective, dir.path().canonicalize().unwrap());
+
+        let _ = std::process::Command::new("git")
+            .args([
+                "worktree",
+                "remove",
+                "--force",
+                &worktree_path.to_string_lossy(),
+            ])
+            .current_dir(dir.path())
+            .status();
     }
 }

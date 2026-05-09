@@ -112,8 +112,48 @@ pub fn remove_path(wt_path: &Path, branch: &str) -> Result<RemoveOutcome> {
 /// Get the worktree path for a branch.
 pub fn path_for(config: &Config, branch: &str) -> Result<PathBuf> {
     let wt_base = worktree_base(config)?;
+    path_for_base(&wt_base, branch)
+}
+
+pub fn path_for_in_repo(config: &Config, repo_path: &Path, branch: &str) -> Result<PathBuf> {
+    let wt_base = worktree_base_for(config, repo_path)?;
+    path_for_base(&wt_base, branch)
+}
+
+fn path_for_base(wt_base: &Path, branch: &str) -> Result<PathBuf> {
     let sanitized = branch.replace('/', "-");
     Ok(wt_base.join(&sanitized))
+}
+
+pub fn move_path(from: &Path, to: &Path) -> Result<()> {
+    if from == to {
+        return Ok(());
+    }
+
+    if let Some(parent) = to.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let output = std::process::Command::new("git")
+        .args([
+            "worktree",
+            "move",
+            &from.to_string_lossy(),
+            &to.to_string_lossy(),
+        ])
+        .output()
+        .context("Failed to move git worktree")?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "git worktree move failed from {} to {}: {}",
+        from.display(),
+        to.display(),
+        command_error(&output)
+    );
 }
 
 /// List all seance-managed worktrees.
